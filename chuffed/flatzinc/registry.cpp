@@ -816,6 +816,31 @@ namespace FlatZinc {
 			p_bool_sum_CMP(IRT_GT, ce, ann);
 		}
 
+		// prop stat posters
+    void p_variance_int(const ConExpr& ce, AST::Node* ann) {
+      vec<IntVar*> iv; arg2intvarargs(iv, ce[1]);
+      int scale = ce[2]->getInt();
+      int mode = ce[3]->getInt();
+      variance_int(getIntVar(ce[0]), iv, scale, mode);
+    }
+    void p_covsq(const ConExpr& ce, AST::Node* ann) {
+      vec<IntVar*> iv; arg2intvarargs(iv, ce[1]);
+			int scale = ce[2]->getInt();
+			covsq(getIntVar(ce[0]), iv, scale);
+		}
+    void p_spread_fast(const ConExpr& ce, AST::Node* ann) {
+      vec<IntVar*> iv; arg2intvarargs(iv, ce[0]);
+      vec<IntVar*> cl; arg2intvarargs(iv, ce[1]);
+      int scale = ce[5]->getInt();
+      spread_fast(iv, cl, getIntVar(ce[2]), getIntVar(ce[3]), getIntVar(ce[4]), scale);
+    }
+    void p_spread_bounds(const ConExpr& ce, AST::Node* ann) {
+      vec<IntVar*> iv; arg2intvarargs(iv, ce[0]);
+      int scale = ce[4]->getInt();
+      spread_bounds(iv, getIntVar(ce[1]), getIntVar(ce[2]), getIntVar(ce[3]), scale);
+    }
+
+
 /*
 		void p_bool_lin_CMP(IntRelType irt, const ConExpr& ce, AST::Node* ann) {
 			vec<int> ia; arg2intargs(ia, ce[0]);
@@ -1159,6 +1184,11 @@ namespace FlatZinc {
 				registry().add("bool_lin_ge_reif", &p_bool_lin_ge_reif);
 				registry().add("bool_lin_gt_reif", &p_bool_lin_gt_reif);
 */
+        registry().add("variance_int", &p_variance_int);
+        registry().add("cov_sq", &p_covsq);
+
+        registry().add("spread_fast", &p_spread_fast);
+        registry().add("spread_bounds", &p_spread_bounds);
 			}
 		};
 		IntPoster __int_poster;

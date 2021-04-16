@@ -134,6 +134,7 @@ add_library(chuffed
   chuffed/globals/regular.cpp
   chuffed/globals/lex.cpp
   chuffed/globals/table.cpp
+        chuffed/globals/probstat.cpp
   chuffed/mdd/MDD.cpp
   chuffed/mdd/mdd_prop.cpp
   chuffed/mdd/mdd_to_lgraph.cpp

@@ -80,4 +80,16 @@ void lex(vec<IntVar*>& x, vec<IntVar*>& y, bool strict);
 void var_sym_break(vec<IntVar*>& x);
 void val_sym_break(vec<IntVar*>& x, int l, int u);
 
+// propstat.c
+
+void variance_int(IntVar* y, vec<IntVar*>& x, int scale, int mode);
+void covsq(IntVar* y, vec<IntVar*>& x, int scale);
+
+// predicate spread_fast(array [int] of var int: x, var int: mean, var int: stdev, var int: median, int: scale);
+
+void spread_fast(vec<IntVar*>& x, vec<IntVar*>& cl, IntVar* mean, IntVar* stdev, IntVar* median, int scale);
+void spread_bounds(vec<IntVar*>& x, IntVar* mean, IntVar* stdev, IntVar* median, int scale);
+
+
+
 #endif
