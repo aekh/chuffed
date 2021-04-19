@@ -12,6 +12,8 @@ public:
   Tint ub_idx = NULL;
   Tint lb_idx = NULL;
 
+  vec<Tint> pos;
+
   VarianceInt(IntVar *_y, vec<IntVar *> &_x, int _scale, int _mode) :
       N(_x.size()), y(_y), x(_x), scale(_scale), mode(_mode) {
     priority = 1;
@@ -19,8 +21,10 @@ public:
       for (int i = 0; i < N; i++) x[i]->attach(this, i, EVENT_LU);
       y->attach(this, N, EVENT_F);
     } else if (mode == 2) {
-      for (int i = 0; i < N; i++) x[i]->attach(this, i, EVENT_F);
+      for (int i = 0; i < N; i++) x[i]->attach(this, i, EVENT_LU);
       y->attach(this, N, EVENT_F);
+      pos.growTo(N);
+      for (int i = 0; i < N; ++i) pos[i] = 2;
     } else {
       for (int i = 0; i < N; i++) x[i]->attach(this, i, EVENT_F);
       y->attach(this, N, EVENT_F);
@@ -35,7 +39,25 @@ public:
 //          (i == lb_idx && c == EVENT_L)) {
 //      }
 		} else if (mode == 2) {
-		  pushInQueue();
+      //printf("%% N = %d, i = %d, c = %d, pos[%d] == %d\n", N, i, c, i, pos[i]);
+      pushInQueue();
+//      if (i == N || pos[i] == 2 || c & EVENT_F) {
+//        //printf("  %% ==2 queue\n");
+//        pushInQueue();
+//      } else if (pos[i] == 1 && c & EVENT_L) { // lb above mean of min variance
+//        //printf("  %% ==1 queue\n");
+//        pushInQueue();
+//      } else if (pos[i] == 0) { // overlapping mean of min variance
+//        //printf("  %% ==0 queue\n");
+//        pushInQueue();
+//      } else if (pos[i] == -1 && c & EVENT_U) { // ub below mean of min variance
+//        //printf("  %% ==-1 queue\n");
+//        pushInQueue();
+//      } else {
+//        //printf("%% N = %d, i = %d, c = %d, pos[%d] == %d\n", N, i, c, i, pos[i]);
+//        pushInQueue();
+//        //return;
+//      }
     } else {
 		  pushInQueue();
 		}
@@ -66,19 +88,6 @@ public:
     if (all_fixed) {
       return checking_prop();
     }
-
-//    function binary_search(A, n, T) is
-//      L := 0
-//      R := n − 1
-//      while L ≤ R do
-//        m := floor((L + R) / 2)
-//        if A[m] < T then
-//          L := m + 1
-//        else if A[m] > T then
-//          R := m − 1
-//        else:
-//          return m
-//      return unsuccessful
 
     int64_t L = 0;
     for (auto i = 0; i < N; ++i) L += x[i]->getMin(); // O(N)
@@ -123,6 +132,16 @@ public:
           m = mR;
         }
 
+//        for (int i = 0; i < N; ++i) {
+//          if (m < x[i]->getMin()) {
+//            pos[i] = 1;
+//          } else if (x[i]->getMax() < m) {
+//            pos[i] = -1;
+//          } else {
+//            pos[i] = 0;
+//          }
+//        }
+
         // calculate variance lb
         long double mult = (long double) 1 / (long double) (N*N*N);
         long double variance_f = mult * (long double) var;
@@ -133,34 +152,34 @@ public:
           Clause* r = nullptr;
           if(so.lazy) {
             // Set up reason
-            Lit lit[2*N];
-            int lits = 0;
-            for(int ii = 0; ii < N; ++ii) {
-              if (m < N*x[ii]->getMin()) {
-                lit[lits++] = x[ii]->getMinLit();
-              } else if (N*x[ii]->getMax() > m) {
-                lit[lits++] = x[ii]->getMaxLit();
-              } else {
-                lit[lits++] = x[ii]->getMinLit();
-                lit[lits++] = x[ii]->getMaxLit();
-              }
-            }
-            r = Reason_new(lits+1);
-            for(int ii = 0; ii < lits; ++ii) (*r)[ii+1] = lit[ii];
-
-//            r = Reason_new(2*N+1); // FIXME this allocates and sets some same explanations twice!3
+//            Lit lit[2*N];
+//            int lits = 0;
 //            for(int ii = 0; ii < N; ++ii) {
 //              if (m < N*x[ii]->getMin()) {
-//                (*r)[ii+1] = x[ii]->getMinLit();
-//                (*r)[N+ii+1] = x[ii]->getMinLit();
+//                lit[lits++] = x[ii]->getMinLit();
 //              } else if (N*x[ii]->getMax() > m) {
-//                (*r)[ii+1] = x[ii]->getMaxLit();
-//                (*r)[N+ii+1] = x[ii]->getMaxLit();
+//                lit[lits++] = x[ii]->getMaxLit();
 //              } else {
-//                (*r)[ii+1] = x[ii]->getMinLit();
-//                (*r)[N+ii+1] = x[ii]->getMaxLit();
+//                lit[lits++] = x[ii]->getMinLit();
+//                lit[lits++] = x[ii]->getMaxLit();
 //              }
 //            }
+//            r = Reason_new(lits+1);
+//            for(int ii = 0; ii < lits; ++ii) (*r)[ii+1] = lit[ii];
+
+            r = Reason_new(2*N+1); // FIXME this allocates and sets some same explanations twice!
+            for(int ii = 0; ii < N; ++ii) {
+              if (m < N*x[ii]->getMin()) {
+                (*r)[ii+1] = x[ii]->getMinLit();
+                (*r)[N+ii+1] = x[ii]->getMinLit();
+              } else if (N*x[ii]->getMax() > m) {
+                (*r)[ii+1] = x[ii]->getMaxLit();
+                (*r)[N+ii+1] = x[ii]->getMaxLit();
+              } else {
+                (*r)[ii+1] = x[ii]->getMinLit();
+                (*r)[N+ii+1] = x[ii]->getMaxLit();
+              }
+            }
 
           }
           if(!y->setMin(variance, r)) return false;
