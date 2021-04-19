@@ -62,8 +62,7 @@ namespace FlatZinc {
             if (s->id == "indomain_max") return VAL_MAX;
             //if (s->id == "indomain_middle") return VAL_MIDDLE;
             if (s->id == "indomain_middle") CHUFFED_ERROR("The value choice annotation 'indomain_middle' is not supported yet!\n");
-            //if (s->id == "indomain_median") return VAL_MEDIAN;
-            if (s->id == "indomain_median") CHUFFED_ERROR("The value choice annotation 'indomain_median' is not supported yet!\n");
+            if (s->id == "indomain_median") return VAL_MEDIAN;
             if (s->id == "indomain_split") return VAL_SPLIT_MIN;
             if (s->id == "indomain_reverse_split") return VAL_SPLIT_MAX;
             //if (s->id == "indomain_random") return VAL_RANDOM;
@@ -84,7 +83,7 @@ namespace FlatZinc {
     void FlatZincSpace::newIntVar(IntVarSpec* vs) {
         // Resizing of the vectors if required
         if (intVarCount == iv.size()) {
-            const int newSize = 2 * intVarCount;
+            const int newSize = intVarCount > 0 ? 2 * intVarCount : 1;
             iv.growTo(newSize);
             iv_introduced.resize(newSize);
         }
@@ -130,7 +129,7 @@ namespace FlatZinc {
     void FlatZincSpace::newBoolVar(BoolVarSpec* vs) {
         // Resizing of the vectors if required
         if (boolVarCount == iv.size()) {
-            const int newSize = 2 * boolVarCount;
+            const int newSize = boolVarCount > 0 ? 2 * boolVarCount : 1;
             bv.growTo(newSize);
             bv_introduced.resize(newSize);
         }
