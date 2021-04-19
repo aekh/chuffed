@@ -85,4 +85,15 @@ void
 edit_distance(int max_char, vec<int> &insertion_cost, vec<int> &deletion_cost, vec<int> &substitution_cost,
               vec<IntVar *> &seq1, vec<IntVar *> &seq2, IntVar *ed);
 
+// propstat.c
+
+void variance_int(IntVar* y, vec<IntVar*>& x, int scale, int mode);
+void covsq(IntVar* y, vec<IntVar*>& x, int scale);
+
+// predicate spread_fast(array [int] of var int: x, var int: mean, var int: stdev, var int: median, int: scale);
+
+void spread_fast(vec<IntVar*>& x, vec<IntVar*>& cl, IntVar* mean, IntVar* stdev, IntVar* median, int scale);
+void spread_bounds(vec<IntVar*>& x, IntVar* mean, IntVar* stdev, IntVar* median, int scale);
+
+
 #endif
