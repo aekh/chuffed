@@ -773,7 +773,21 @@ namespace FlatZinc {
       vec<IntVar*> iv1; arg2intvarargs(iv1, ce[1]);
       lex(iv0, iv1, false);
     }
-  
+
+	void p_edit_distance(const ConExpr& ce, AST::Node* ann) {
+        vec<int> insertion_costs;
+        arg2intargs(insertion_costs, ce[1]);
+        vec<int> deletion_costs;
+        arg2intargs(deletion_costs, ce[2]);
+        vec<int> substitution_costs;
+        arg2intargs(substitution_costs, ce[3]);
+		vec<IntVar*> seq1;
+		arg2intvarargs(seq1, ce[4]);
+		vec<IntVar*> seq2;
+		arg2intvarargs(seq2, ce[5]);
+		edit_distance(ce[0]->getInt(), insertion_costs, deletion_costs, substitution_costs, seq1, seq2, getIntVar(ce[6]));
+	}
+
 		void var_sym( const ConExpr& ce, AST::Node* ann) {
       vec<IntVar*> iv0; arg2intvarargs(iv0, ce[0]);
 			var_sym_ldsb(iv0);
@@ -799,9 +813,6 @@ namespace FlatZinc {
 		}
 		void p_bool_sum_eq(const ConExpr& ce, AST::Node* ann) {
 			p_bool_sum_CMP(IRT_EQ, ce, ann);
-		}
-		void p_bool_sum_ne(const ConExpr& ce, AST::Node* ann) {
-			p_bool_sum_CMP(IRT_NE, ce, ann);
 		}
 		void p_bool_sum_le(const ConExpr& ce, AST::Node* ann) {
 			p_bool_sum_CMP(IRT_LE, ce, ann);
@@ -1127,22 +1138,23 @@ namespace FlatZinc {
         registry().add("set_in", &p_set_in);
         registry().add("set_in_reif", &p_set_in_reif);
 
-				registry().add("all_different_int", &p_all_different_int);
+				registry().add("fzn_all_different_int", &p_all_different_int);
 				registry().add("inverse_offsets", &p_inverse_offsets);
-				registry().add("table_int", &p_table_int);
-				registry().add("regular", &p_regular);
-				registry().add("cost_regular", &p_cost_regular);
+				registry().add("chuffed_table_int", &p_table_int);
+				registry().add("chuffed_regular", &p_regular);
+				registry().add("chuffed_cost_regular", &p_cost_regular);
 				registry().add("chuffed_disjunctive_strict", &p_disjunctive);
 				registry().add("chuffed_cumulative", &p_cumulative);
 				registry().add("chuffed_cumulative_vars", &p_cumulative2);
 				registry().add("chuffed_cumulative_cal", &p_cumulative_cal);
                 registry().add("chuffed_circuit", &p_circuit);
                 registry().add("chuffed_subcircuit", &p_subcircuit);
-				registry().add("minimum_int", &p_minimum);
-				registry().add("maximum_int", &p_maximum);
+				registry().add("array_int_minimum", &p_minimum);
+				registry().add("array_int_maximum", &p_maximum);
 				registry().add("chuffed_maximum_arg_bool", &p_bool_arg_max);
 				registry().add("lex_less_int", &p_lex_less);
 				registry().add("lex_lesseq_int", &p_lex_lesseq);
+				registry().add("chuffed_edit_distance", &p_edit_distance);
 
 				registry().add("variables_interchange", &var_sym);
 				registry().add("values_interchange", &val_sym);
@@ -1164,7 +1176,6 @@ namespace FlatZinc {
 				registry().add("cumulatives", &p_cumulatives);
 */
 				registry().add("bool_sum_eq", &p_bool_sum_eq);
-				registry().add("bool_sum_ne", &p_bool_sum_ne);
 				registry().add("bool_sum_le", &p_bool_sum_le);
 				registry().add("bool_sum_lt", &p_bool_sum_lt);
 				registry().add("bool_sum_ge", &p_bool_sum_ge);
