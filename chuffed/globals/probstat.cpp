@@ -13,6 +13,8 @@ public:
   Tint lb_idx = NULL;
 
   vec<Tint> pos;
+  Tint64_t m_global;
+  Tint all_fixed;
 
   VarianceInt(IntVar *_y, vec<IntVar *> &_x, int _scale, int _mode) :
       N(_x.size()), y(_y), x(_x), scale(_scale), mode(_mode) {
@@ -21,9 +23,11 @@ public:
       for (int i = 0; i < N; i++) x[i]->attach(this, i, EVENT_LU);
       y->attach(this, N, EVENT_F);
     } else if (mode == 2) {
-      for (int i = 0; i < N; i++) x[i]->attach(this, i, EVENT_LU);
-      y->attach(this, N, EVENT_F);
       pos.growTo(N);
+      for (int i = 0; i < N; i++) {
+        x[i]->attach(this, i, EVENT_LU);
+      }
+      y->attach(this, N, EVENT_F);
       for (int i = 0; i < N; ++i) pos[i] = 2;
     } else {
       for (int i = 0; i < N; i++) x[i]->attach(this, i, EVENT_F);
@@ -32,6 +36,16 @@ public:
   }
 
   void wakeup(int i, int c) {
+    if (all_fixed == 0 && c & EVENT_F) {
+      all_fixed = 1;
+      for (int i = 0; i < N; i++) { // O(N)
+        if (!x[i]->isFixed()) {
+          all_fixed = 0;
+          break;
+        }
+      }
+    }
+
     if (mode == 1) {
       pushInQueue();
 //      if ((!ub_idx || !lb_idx) ||
@@ -39,25 +53,19 @@ public:
 //          (i == lb_idx && c == EVENT_L)) {
 //      }
 		} else if (mode == 2) {
-      //printf("%% N = %d, i = %d, c = %d, pos[%d] == %d\n", N, i, c, i, pos[i]);
-      pushInQueue();
-//      if (i == N || pos[i] == 2 || c & EVENT_F) {
-//        //printf("  %% ==2 queue\n");
-//        pushInQueue();
-//      } else if (pos[i] == 1 && c & EVENT_L) { // lb above mean of min variance
-//        //printf("  %% ==1 queue\n");
-//        pushInQueue();
-//      } else if (pos[i] == 0) { // overlapping mean of min variance
-//        //printf("  %% ==0 queue\n");
-//        pushInQueue();
-//      } else if (pos[i] == -1 && c & EVENT_U) { // ub below mean of min variance
-//        //printf("  %% ==-1 queue\n");
-//        pushInQueue();
-//      } else {
-//        //printf("%% N = %d, i = %d, c = %d, pos[%d] == %d\n", N, i, c, i, pos[i]);
-//        pushInQueue();
-//        //return;
-//      }
+      if (i == N || pos[i] == 2 || all_fixed) {
+        pushInQueue();
+      } else if (pos[i] == 1 && c & EVENT_L) { // lb above mean of min variance
+        pushInQueue();
+      } else if (pos[i] == 0) { // overlapping mean of min variance
+        if (c & EVENT_U && N*x[i]->getMax() < m_global) {
+          pushInQueue();
+        } else if (c & EVENT_L && m_global < N*x[i]->getMin()) {
+          pushInQueue();
+        }
+      } else if (pos[i] == -1 && c & EVENT_U) { // ub below mean of min variance
+        pushInQueue();
+      }
     } else {
 		  pushInQueue();
 		}
@@ -66,7 +74,7 @@ public:
 
   bool propagate() {
     if (mode == 2) {
-      return chop_prop();
+      return chop_prop(); // && quick_prop();
     }
     if (mode == 1) {
       return quick_prop();
@@ -78,16 +86,7 @@ public:
   }
 
   bool chop_prop() {
-    bool all_fixed = true;
-    for (int i = 0; i < N; i++) { // O(N)
-      if (!x[i]->isFixed()) {
-        all_fixed = false;
-        break;
-      }
-    }
-    if (all_fixed) {
-      return checking_prop();
-    }
+    if (all_fixed) return checking_prop();
 
     int64_t L = 0;
     for (auto i = 0; i < N; ++i) L += x[i]->getMin(); // O(N)
@@ -131,55 +130,56 @@ public:
           var = varR;
           m = mR;
         }
+        m_global = m;
 
-//        for (int i = 0; i < N; ++i) {
-//          if (m < x[i]->getMin()) {
-//            pos[i] = 1;
-//          } else if (x[i]->getMax() < m) {
-//            pos[i] = -1;
-//          } else {
-//            pos[i] = 0;
-//          }
-//        }
+        for (int i = 0; i < N; ++i) {
+          if (m < N*x[i]->getMin()) {
+            pos[i] = 1;
+          } else if (N*x[i]->getMax() < m) {
+            pos[i] = -1;
+          } else {
+            pos[i] = 0;
+          }
+        }
 
         // calculate variance lb
-        long double mult = (long double) 1 / (long double) (N*N*N);
-        long double variance_f = mult * (long double) var;
+        long double variance_f = (long double) var / (long double) (N*N*N);
         auto variance = (int64_t) (variance_f * scale);
 
         // set y
+        //printf("want to set y to %d..%d from %d..%d \n", variance, y->getMax(), y->getMin(), y->getMax());
         if(y->setMinNotR(variance)) {
           Clause* r = nullptr;
           if(so.lazy) {
             // Set up reason
-//            Lit lit[2*N];
-//            int lits = 0;
-//            for(int ii = 0; ii < N; ++ii) {
-//              if (m < N*x[ii]->getMin()) {
-//                lit[lits++] = x[ii]->getMinLit();
-//              } else if (N*x[ii]->getMax() > m) {
-//                lit[lits++] = x[ii]->getMaxLit();
-//              } else {
-//                lit[lits++] = x[ii]->getMinLit();
-//                lit[lits++] = x[ii]->getMaxLit();
-//              }
-//            }
-//            r = Reason_new(lits+1);
-//            for(int ii = 0; ii < lits; ++ii) (*r)[ii+1] = lit[ii];
-
-            r = Reason_new(2*N+1); // FIXME this allocates and sets some same explanations twice!
+            Lit lit[2*N];
+            int lits = 0;
             for(int ii = 0; ii < N; ++ii) {
               if (m < N*x[ii]->getMin()) {
-                (*r)[ii+1] = x[ii]->getMinLit();
-                (*r)[N+ii+1] = x[ii]->getMinLit();
+                lit[lits++] = x[ii]->getMinLit();
               } else if (N*x[ii]->getMax() > m) {
-                (*r)[ii+1] = x[ii]->getMaxLit();
-                (*r)[N+ii+1] = x[ii]->getMaxLit();
+                lit[lits++] = x[ii]->getMaxLit();
               } else {
-                (*r)[ii+1] = x[ii]->getMinLit();
-                (*r)[N+ii+1] = x[ii]->getMaxLit();
+                lit[lits++] = x[ii]->getMinLit();
+                lit[lits++] = x[ii]->getMaxLit();
               }
             }
+            r = Reason_new(lits+1);
+            for(int ii = 0; ii < lits; ++ii) (*r)[ii+1] = lit[ii];
+
+//            r = Reason_new(2*N+1); // FIXME this allocates and sets some same explanations twice!
+//            for(int ii = 0; ii < N; ++ii) {
+//              if (m < N*x[ii]->getMin()) {
+//                (*r)[ii+1] = x[ii]->getMinLit();
+//                (*r)[N+ii+1] = x[ii]->getMinLit();
+//              } else if (N*x[ii]->getMax() > m) {
+//                (*r)[ii+1] = x[ii]->getMaxLit();
+//                (*r)[N+ii+1] = x[ii]->getMaxLit();
+//              } else {
+//                (*r)[ii+1] = x[ii]->getMinLit();
+//                (*r)[N+ii+1] = x[ii]->getMaxLit();
+//              }
+//            }
 
           }
           if(!y->setMin(variance, r)) return false;
@@ -273,32 +273,29 @@ public:
   }
 
   bool checking_prop() {
+    //printf("%% Fixed Proping! variance = %d..%d \n", y->getMin(), y->getMax());
     // only propagate if all fixed
-    for (int i = 0; i < N; i++) {
-      if (!x[i]->isFixed()) {
-        return true;
-      }
-    }
+    if (!all_fixed) return true;
 
-    // mean
+    // N*mean
     int64_t sumx = 0;
     for (int i = 0; i < N; i++) sumx += x[i]->getVal();
-    long double mean = (long double) sumx / (long double) N;
 
-    // squared diff
-    long double sqdiff = 0;
+    // N*N * squared diff
+    int64_t sqdiff = 0;
     for (int i = 0; i < N; i++) {
-      long double diff = ( (long double) x[i]->getVal() - mean);
+      int64_t diff = N * x[i]->getVal() - sumx;
       sqdiff += diff * diff;
     }
 
     // result
-    long double result_f = sqdiff / (long double) N;
-    uint64_t result = (int64_t) (result_f * scale);
+    long double result_f = (long double) sqdiff / (long double) (N*N*N);
+    int64_t result = (int64_t) (result_f * scale);
 
     //printf("%% sqdiff = %Lf and result = %lld", sqdiff, result);
 
     // set y
+    //printf("want to set y to %lli\n", result);
     if(y->setValNotR(result)) {
       Clause* r = nullptr;
       if(so.lazy) {
