@@ -830,9 +830,9 @@ namespace FlatZinc {
 		// prop stat posters
     void p_variance_int(const ConExpr& ce, AST::Node* ann) {
       vec<IntVar*> iv; arg2intvarargs(iv, ce[1]);
-      int scale = ce[2]->getInt();
-      int mode = ce[3]->getInt();
-      variance_int(getIntVar(ce[0]), iv, scale, mode);
+      int scale = ce[3]->getInt();
+      int mode = ce[4]->getInt();
+      variance_int(getIntVar(ce[0]), iv, getIntVar(ce[2]), scale, mode);
     }
     void p_covsq(const ConExpr& ce, AST::Node* ann) {
       vec<IntVar*> iv; arg2intvarargs(iv, ce[1]);

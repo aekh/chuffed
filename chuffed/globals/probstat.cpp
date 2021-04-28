@@ -6,6 +6,7 @@ public:
   int const N;
   IntVar *y;
   vec<IntVar *> x;
+  IntVar *s;
   int scale;
   int mode;
 
@@ -15,20 +16,24 @@ public:
   vec<Tint> pos;
   Tint64_t m_global;
   Tint all_fixed;
+  Tint subsumed;
 
-  VarianceInt(IntVar *_y, vec<IntVar *> &_x, int _scale, int _mode) :
-      N(_x.size()), y(_y), x(_x), scale(_scale), mode(_mode) {
-    priority = 1;
+  VarianceInt(IntVar *_y, vec<IntVar *> &_x, IntVar *_s, int _scale, int _mode) :
+      N(_x.size()), y(_y), x(_x), s(_s), scale(_scale), mode(_mode) {
+    priority = 4;
+    all_fixed = 0;
+    subsumed = 0;
     if (mode == 1) {
       for (int i = 0; i < N; i++) x[i]->attach(this, i, EVENT_LU);
       y->attach(this, N, EVENT_F);
     } else if (mode == 2) {
       pos.growTo(N);
+      for (int i = 0; i < N; ++i) pos[i] = 2;
       for (int i = 0; i < N; i++) {
         x[i]->attach(this, i, EVENT_LU);
       }
       y->attach(this, N, EVENT_F);
-      for (int i = 0; i < N; ++i) pos[i] = 2;
+      s->attach(this, N+1, EVENT_LU);
     } else {
       for (int i = 0; i < N; i++) x[i]->attach(this, i, EVENT_F);
       y->attach(this, N, EVENT_F);
@@ -36,14 +41,17 @@ public:
   }
 
   void wakeup(int i, int c) {
-    if (all_fixed == 0 && c & EVENT_F) {
-      all_fixed = 1;
+    if (subsumed) return;
+    //if (i == N+1 && )
+    if (all_fixed == 0 && (c & EVENT_F || c & EVENT_LF || c & EVENT_UF)) {
+      int all_fixed_ = 1;
       for (int i = 0; i < N; i++) { // O(N)
         if (!x[i]->isFixed()) {
-          all_fixed = 0;
+          all_fixed_ = 0;
           break;
         }
       }
+      all_fixed = all_fixed_;
     }
 
     if (mode == 1) {
@@ -52,10 +60,10 @@ public:
 //		      (i == ub_idx && c == EVENT_U) ||
 //          (i == lb_idx && c == EVENT_L)) {
 //      }
-		} else if (mode == 2) {
-      if (i == N || pos[i] == 2 || all_fixed) {
+    } else if (mode == 2) {
+      if (i >= N || pos[i] == 2 || all_fixed) {
         pushInQueue();
-      } else if (pos[i] == 1 && c & EVENT_L) { // lb above mean of min variance
+      } else if (pos[i] == 1 && (c & EVENT_L || c & EVENT_F || c & EVENT_LF)) { // lb above mean of min variance
         pushInQueue();
       } else if (pos[i] == 0) { // overlapping mean of min variance
         if (c & EVENT_U && N*x[i]->getMax() < m_global) {
@@ -63,18 +71,22 @@ public:
         } else if (c & EVENT_L && m_global < N*x[i]->getMin()) {
           pushInQueue();
         }
-      } else if (pos[i] == -1 && c & EVENT_U) { // ub below mean of min variance
+      } else if (pos[i] == -1 && (c & EVENT_U || c & EVENT_F || c & EVENT_UF)) { // ub below mean of min variance
         pushInQueue();
       }
     } else {
-		  pushInQueue();
-		}
+      pushInQueue();
+    }
   }
 
 
   bool propagate() {
+//    for (int i = 0; i < N; ++i) printf("%% x[%d] = %d..%d      ", i, x[i]->getMin(), x[i]->getMax());
+//    printf("%% y = %d..%d      ", y->getMin(), y->getMax());
+//    printf("%% s = %d..%d\n", s->getMin(), s->getMax());
+
     if (mode == 2) {
-      return chop_prop(); // && quick_prop();
+      return chop_prop();// && quick_prop();
     }
     if (mode == 1) {
       return quick_prop();
@@ -88,15 +100,26 @@ public:
   bool chop_prop() {
     if (all_fixed) return checking_prop();
 
-    int64_t L = 0;
-    for (auto i = 0; i < N; ++i) L += x[i]->getMin(); // O(N)
-    int64_t R = 0;
-    for (auto i = 0; i < N; ++i) R += x[i]->getMax(); // O(N)
+    int64_t min_sum = 0;
+    //for (auto i = 0; i < N; ++i) min_sum += x[i]->getMin(); // O(N)
+    min_sum = s->getMin();
+
+    int64_t max_sum = 0;
+    //for (auto i = 0; i < N; ++i) max_sum += x[i]->getMax(); // O(N)
+    max_sum = s->getMax();
+
+    int64_t L = min_sum;
+    int64_t R = max_sum;
+
+//    printf("%%%%%%%% -------- %%%%%%%%\n");
 
     while (L <= R) { // O(log sup x - inf x)
-      int64_t m = (L + R)/2; // round down
+//      printf("%% Now?\n");
+      int64_t m = (L + R)/2; m = m - (m<0); // round down
       int64_t mR = m+1; // round up to next
-      if (L+1 == R) { // if L+1 = R < 0
+      if (m < L || R < m) m = L;
+      if (mR < L || R < mR) mR = R;
+      if (L + 1 == R) {
         m = L;
         mR = R;
       }
@@ -119,13 +142,21 @@ public:
         } // else overlap (fractional relaxation)
       }
 
+//      printf("%% L = %lld, \t m = %lld, \t mR = %lld, \t R = %lld, \t var = %lld, varR = %lld\n", L, m, mR, R,
+//          (int64_t) (((long double) var / (long double) (N*N*N)) * scale),
+//          (int64_t) (((long double) varR / (long double) (N*N*N)) * scale));
+
       if (var == 0 || varR == 0) {
+//        printf("%% var = 0!!..\n");
         return true; // no point in propagating var >= 0
-      } else if (var > varR && R != mR) {
+      } else if (var > varR && R > mR) {
+//        printf("%% L = mR!!..\n");
         L = mR;
-      } else if (var < varR && L != m) {
+      } else if (var < varR && L < m) {
+//        printf("%% R = m!!..\n");
         R = m;
-      } else {
+      } else { // runs once!
+//        printf("%% else!!..\n");
         if (var > varR) {
           var = varR;
           m = mR;
@@ -147,46 +178,160 @@ public:
         auto variance = (int64_t) (variance_f * scale);
 
         // set y
-        //printf("want to set y to %d..%d from %d..%d \n", variance, y->getMax(), y->getMin(), y->getMax());
+//        printf("%% want to set y to %lld..%d from %d..%d \n", variance, y->getMax(), y->getMin(), y->getMax());
         if(y->setMinNotR(variance)) {
           Clause* r = nullptr;
           if(so.lazy) {
             // Set up reason
-            Lit lit[2*N];
+            Lit lit[2*N+2];
             int lits = 0;
             for(int ii = 0; ii < N; ++ii) {
               if (m < N*x[ii]->getMin()) {
                 lit[lits++] = x[ii]->getMinLit();
-              } else if (N*x[ii]->getMax() > m) {
+              } else if (N*x[ii]->getMax() < m) {
                 lit[lits++] = x[ii]->getMaxLit();
               } else {
-                lit[lits++] = x[ii]->getMinLit();
-                lit[lits++] = x[ii]->getMaxLit();
+                //lit[lits++] = x[ii]->getMinLit();
+                //lit[lits++] = x[ii]->getMaxLit();
               }
+            }
+            if (m == s->getMin()) {
+              lit[lits++] = s->getMinLit();
+            } else if (m == s->getMax()) {
+              lit[lits++] = s->getMaxLit();
             }
             r = Reason_new(lits+1);
             for(int ii = 0; ii < lits; ++ii) (*r)[ii+1] = lit[ii];
-
-//            r = Reason_new(2*N+1); // FIXME this allocates and sets some same explanations twice!
-//            for(int ii = 0; ii < N; ++ii) {
-//              if (m < N*x[ii]->getMin()) {
-//                (*r)[ii+1] = x[ii]->getMinLit();
-//                (*r)[N+ii+1] = x[ii]->getMinLit();
-//              } else if (N*x[ii]->getMax() > m) {
-//                (*r)[ii+1] = x[ii]->getMaxLit();
-//                (*r)[N+ii+1] = x[ii]->getMaxLit();
-//              } else {
-//                (*r)[ii+1] = x[ii]->getMinLit();
-//                (*r)[N+ii+1] = x[ii]->getMaxLit();
-//              }
-//            }
-
           }
+          //printf("%% blab\n");
           if(!y->setMin(variance, r)) return false;
         }
+
+//        printf("%% --> %lld, --> %lld\n", m - min_sum , max_sum - m);
+//        if (m == min_sum) {
+//          printf("%% m == MIN !!\n");
+//        } else if (m == max_sum) {
+//          printf("%% m == MAX !!\n");
+//        }
+
+//        return true;
+
+        // propagate x's
+        int64_t mins[N];
+        int64_t min_var_sum = 0;
+        for (int i = 0; i < N; ++i) { // O(N)
+          int64_t xlb = x[i]->getMin();
+          int64_t xub = x[i]->getMax();
+          if (max_sum - xub + xlb < N*xlb) { // above
+            int64_t diff = N*xlb - (max_sum - xub + xlb);
+            mins[i] = (diff) * (diff);
+            min_var_sum += mins[i];
+          } else if (N*xub < min_sum - xlb + xub) { //below
+            int64_t diff = N*xub - (min_sum - xlb + xub);
+            mins[i] = (diff) * (diff);
+            min_var_sum += mins[i];
+          } else { //overlap
+            mins[i] = 0;
+          }
+        }
+
+        int64_t n3var_upr = (y->getMax() * N * N * N) / scale;
+        for (int i = 0; i < N; ++i) { // O(N)
+          int64_t tvar = min_var_sum - mins[i];
+          int64_t xlb = x[i]->getMin();
+          int64_t xub = x[i]->getMax();
+          if (max_sum - xub + xlb < N*xlb) { // above
+            int64_t diff = N*xub - max_sum;
+            int64_t maxsq = (diff) * (diff);
+            if (maxsq > n3var_upr - tvar) {
+              //printf("%% WE CAN PROP for ABOVE!\n");
+              long double sqrt = sqrtl((long double) n3var_upr - tvar);
+              auto sqrt_i = (int64_t) (sqrt + 0.5 - (sqrt<0));
+              //if (xub < 0) sqrt_i = -sqrt_i;
+              long double div = (long double) (sqrt_i + max_sum) / (long double) N;
+              auto upr = (int64_t) (div + 0.5 - (div<0));
+//              printf("%% -->> want to set x[%d] to %d..%lld from %d..%d \n", i, x[i]->getMin(), upr, x[i]->getMin(), x[i]->getMax());
+//              printf("%% min_var_sum = %lld,     tvar = %lld,     diff = %lld,     maxsq = %lld,     sqrt = %Lf,     sqrt_i = %lld,   div = %Lf,     n3var_upr = %lld,     n3var_upr - tvar = %lld,     max_sum = %lld\n", min_var_sum, tvar, diff, maxsq, sqrt, sqrt_i, div, n3var_upr, n3var_upr-tvar, max_sum);
+              if(x[i]->setMaxNotR(upr)) {
+//                printf("%% !!--!! WE really CAN PROP for ABOVE!\n");
+                Clause* r = nullptr;
+                if(so.lazy) {
+                  // Set up reason
+                  Lit lit[2*N+2];
+                  int lits = 0;
+                  for(int ii = 0; ii < N; ++ii) {
+                    if (ii == i) continue;
+                    lit[lits++] = x[ii]->getMinLit();
+                    lit[lits++] = x[ii]->getMaxLit();
+                  }
+                  lit[lits++] = s->getMinLit();
+                  lit[lits++] = s->getMaxLit();
+                  r = Reason_new(lits+1);
+                  for(int ii = 0; ii < lits; ++ii) (*r)[ii+1] = lit[ii];
+                }
+                //printf("%% blab\n");
+                if(!x[i]->setMax(upr, r)) return false;
+              }
+            }
+          } else if (N*xub < min_sum - xlb + xub) { //below
+            int64_t diff = N*xlb - min_sum;
+            int64_t maxsq = (diff) * (diff);
+            if (maxsq > n3var_upr - tvar) {
+              long double sqrt = sqrtl((long double) n3var_upr - tvar);
+              auto sqrt_i = (int64_t) (sqrt + 0.5 - (sqrt<0));
+              //if (xub < 0) sqrt_i = -sqrt_i;
+              long double div = (long double) (sqrt_i + max_sum) / (long double) N;
+              auto lwr = (int64_t) (div + 0.5 - (div<0));
+//              printf("%% -->> want to set x[%d] to %d..%lld from %d..%d \n", i, lwr, x[i]->getMax(), x[i]->getMin(), x[i]->getMax());
+//              printf("%% min_var_sum = %lld,     tvar = %lld,     diff = %lld,     maxsq = %lld,     sqrt = %Lf,     sqrt_i = %lld,   div = %Lf,     n3var_upr = %lld,     n3var_upr - tvar = %lld,     max_sum = %lld\n", min_var_sum, tvar, diff, maxsq, sqrt, sqrt_i, div, n3var_upr, n3var_upr-tvar, max_sum);
+              if(x[i]->setMinNotR(lwr)) {
+//                printf("%% !!--!! WE really CAN PROP for BELOW!\n");
+                Clause* r = nullptr;
+                if(so.lazy) {
+                  // Set up reason
+                  Lit lit[2*N+2];
+                  int lits = 0;
+                  for(int ii = 0; ii < N; ++ii) {
+                    if (ii == i) continue;
+                    lit[lits++] = x[ii]->getMinLit();
+                    lit[lits++] = x[ii]->getMaxLit();
+                  }
+                  lit[lits++] = s->getMinLit();
+                  lit[lits++] = s->getMaxLit();
+                  r = Reason_new(lits+1);
+                  for(int ii = 0; ii < lits; ++ii) (*r)[ii+1] = lit[ii];
+                }
+                //printf("%% blab\n");
+                if(!x[i]->setMin(lwr, r)) return false;
+              }
+            }
+          }
+        }
+
+
+//        if (m == min_sum) {
+//
+//        } else if (m == max_sum) {
+//
+//        } else { // min_sum < m < max_sum
+//
+//        }
+//
+//        for (int i = 0; i < N; ++i) { // O(N)
+//          if (pos[i] == 0) continue;
+//          if (pos[i] == -1) {
+//            int64_t nx = x[i]->getMin();
+//            int64_t nx_diff = x[i]->getMax() - x[i]->getMin();
+//            int64_t nm = m - nx_diff;
+//          } else if (pos[i] == 1) {
+//
+//          }
+//        }
+
         return true;
       }
     }
+    printf("%% Hmmm.....\n");
   }
 
 //  bool naive_prop() {
@@ -226,16 +371,7 @@ public:
 //  }
 
   bool quick_prop() {
-    bool all_fixed = true;
-    for (int i = 0; i < N; i++) {
-      if (!x[i]->isFixed()) {
-        all_fixed = false;
-        break;
-      }
-    }
-    if (all_fixed) {
-      return checking_prop();
-    }
+    if (all_fixed) return checking_prop();
 
     // Popoviciu's inequality on variances
     int64_t min_lb = INT64_MAX;
@@ -279,7 +415,12 @@ public:
 
     // N*mean
     int64_t sumx = 0;
-    for (int i = 0; i < N; i++) sumx += x[i]->getVal();
+    for (int i = 0; i < N; i++) {
+//      printf("%% asdasd");
+//      printf("%% x[%d] = %d..%d\n", i, x[i]->getMin(), x[i]->getMax());
+//      printf("%% x[%d] = %d\n", i, x[i]->getVal());
+      sumx += x[i]->getVal();
+    }
 
     // N*N * squared diff
     int64_t sqdiff = 0;
@@ -295,7 +436,7 @@ public:
     //printf("%% sqdiff = %Lf and result = %lld", sqdiff, result);
 
     // set y
-    //printf("want to set y to %lli\n", result);
+//    printf("%% want to set y to %lli when it is %d..%d\n", result, y->getMin(), y->getMax());
     if(y->setValNotR(result)) {
       Clause* r = nullptr;
       if(so.lazy) {
@@ -303,8 +444,10 @@ public:
         r = Reason_new(N+1);
         for(int ii = 0; ii < N; ++ii) { (*r)[ii+1] = x[ii]->getValLit(); }
       }
+//      printf("%% blib\n");
       if(!y->setVal(result, r)) return false;
     }
+    subsumed = 1;
     return true;
   }
 };
@@ -378,8 +521,8 @@ void covsq(IntVar* y, vec<IntVar*>& x, int scale) {
   new CovSq(y, x, scale);
 }
 
-void variance_int(IntVar* y, vec<IntVar*>& x, int scale, int mode) {
-  if (x.size() >= 1) new VarianceInt(y, x, scale, mode);
+void variance_int(IntVar* y, vec<IntVar*>& x, IntVar* s, int scale, int mode) {
+  if (x.size() >= 1) new VarianceInt(y, x, s, scale, mode);
 }
 
 
