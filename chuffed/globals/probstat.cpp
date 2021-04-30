@@ -1,5 +1,6 @@
 #include <chuffed/core/propagator.h>
 #include <stdlib.h>
+#include <cfenv>
 
 class VarianceInt : public Propagator {
 public:
@@ -40,7 +41,7 @@ public:
     }
   }
 
-  void wakeup(int i, int c) {
+  void wakeup(int i, int c) override {
     if (subsumed) return;
     //if (i == N+1 && )
     if (all_fixed == 0 && (c & EVENT_F || c & EVENT_LF || c & EVENT_UF)) {
@@ -53,6 +54,8 @@ public:
       }
       all_fixed = all_fixed_;
     }
+    pushInQueue();
+    return;
 
     if (mode == 1) {
       pushInQueue();
@@ -80,7 +83,7 @@ public:
   }
 
 
-  bool propagate() {
+  bool propagate() override {
 //    for (int i = 0; i < N; ++i) printf("%% x[%d] = %d..%d      ", i, x[i]->getMin(), x[i]->getMax());
 //    printf("%% y = %d..%d      ", y->getMin(), y->getMax());
 //    printf("%% s = %d..%d\n", s->getMin(), s->getMax());
@@ -101,11 +104,13 @@ public:
     if (all_fixed) return checking_prop();
 
     int64_t min_sum = 0;
-    //for (auto i = 0; i < N; ++i) min_sum += x[i]->getMin(); // O(N)
+    int64_t min_sum_b = 0;
+    for (auto i = 0; i < N; ++i) min_sum_b += x[i]->getMin(); // O(N)
     min_sum = s->getMin();
 
     int64_t max_sum = 0;
-    //for (auto i = 0; i < N; ++i) max_sum += x[i]->getMax(); // O(N)
+    int64_t max_sum_b = 0;
+    for (auto i = 0; i < N; ++i) max_sum_b += x[i]->getMax(); // O(N)
     max_sum = s->getMax();
 
     int64_t L = min_sum;
@@ -174,32 +179,40 @@ public:
         }
 
         // calculate variance lb
+        const int reset = std::fegetround();
+        std::fesetround(FE_DOWNWARD);
         long double variance_f = (long double) var / (long double) (N*N*N);
         auto variance = (int64_t) (variance_f * scale);
+        std:fesetround(reset);
 
         // set y
-//        printf("%% want to set y to %lld..%d from %d..%d \n", variance, y->getMax(), y->getMin(), y->getMax());
         if(y->setMinNotR(variance)) {
+//          for (int i = 0; i < N; ++i) printf("%% x[%d] = %d..%d      ", i, x[i]->getMin(), x[i]->getMax());
+//          printf("%% y = %d..%d      ", y->getMin(), y->getMax());
+//          printf("%% s = %d..%d\n", s->getMin(), s->getMax());
+//          printf("%% want to set y to %lld..%d from %d..%d \n", variance, y->getMax(), y->getMin(), y->getMax());
           Clause* r = nullptr;
           if(so.lazy) {
             // Set up reason
             Lit lit[2*N+2];
             int lits = 0;
             for(int ii = 0; ii < N; ++ii) {
-              if (m < N*x[ii]->getMin()) {
+              if (m < N*x[ii]->getMin()) { // above
                 lit[lits++] = x[ii]->getMinLit();
-              } else if (N*x[ii]->getMax() < m) {
+//                lit[lits++] = x[ii]->getMaxLit();
+              } else if (N*x[ii]->getMax() < m) { // below
                 lit[lits++] = x[ii]->getMaxLit();
+//                lit[lits++] = x[ii]->getMinLit();
               } else {
                 //lit[lits++] = x[ii]->getMinLit();
                 //lit[lits++] = x[ii]->getMaxLit();
               }
             }
-            if (m == s->getMin()) {
+            //if (m == s->getMin()) {
               lit[lits++] = s->getMinLit();
-            } else if (m == s->getMax()) {
+            //} else if (m == s->getMax()) {
               lit[lits++] = s->getMaxLit();
-            }
+            //}
             r = Reason_new(lits+1);
             for(int ii = 0; ii < lits; ++ii) (*r)[ii+1] = lit[ii];
           }
@@ -207,37 +220,41 @@ public:
           if(!y->setMin(variance, r)) return false;
         }
 
-//        printf("%% --> %lld, --> %lld\n", m - min_sum , max_sum - m);
-//        if (m == min_sum) {
-//          printf("%% m == MIN !!\n");
-//        } else if (m == max_sum) {
-//          printf("%% m == MAX !!\n");
-//        }
-
-//        return true;
+        //return true;
 
         // propagate x's
+//        printf("  %%   # P # R O P ##\n");
         int64_t mins[N];
         int64_t min_var_sum = 0;
         for (int i = 0; i < N; ++i) { // O(N)
           int64_t xlb = x[i]->getMin();
           int64_t xub = x[i]->getMax();
           if (max_sum - xub + xlb < N*xlb) { // above
-            int64_t diff = N*xlb - (max_sum - xub + xlb);
+            int64_t sub = max_sum_b - xub + xlb;
+            if (max_sum < sub) sub = max_sum;
+            int64_t diff = N*xlb - sub;
             mins[i] = (diff) * (diff);
             min_var_sum += mins[i];
+//            printf("%%   # # ## above sq = %lld, min_var_sum-> = %lld, xlb = %lld, N = %d, max_sum = %lld, xub = %lld\n", mins[i], min_var_sum, xlb, N, max_sum, xub);
           } else if (N*xub < min_sum - xlb + xub) { //below
-            int64_t diff = N*xub - (min_sum - xlb + xub);
+            int64_t sub = min_sum_b - xlb + xub;
+            if (min_sum > sub) sub = min_sum;
+            int64_t diff = N*xub - sub;
             mins[i] = (diff) * (diff);
             min_var_sum += mins[i];
+//            printf("%%   # # ## BElow sq = %lld, min_var_sum-> = %lld, xlb = %lld, N = %d, min_sum = %lld, xub = %lld\n", mins[i], min_var_sum, xlb, N, min_sum, xub);
           } else { //overlap
             mins[i] = 0;
           }
         }
+        printf("%% bad = %lld, vs good = %lld\n", min_var_sum, var);
+        min_var_sum = var;
+
 
         int64_t n3var_upr = (y->getMax() * N * N * N) / scale;
         for (int i = 0; i < N; ++i) { // O(N)
           int64_t tvar = min_var_sum - mins[i];
+//          printf("    %% min_var_sum = %lld, tvar = %lld\n", min_var_sum, tvar);
           int64_t xlb = x[i]->getMin();
           int64_t xub = x[i]->getMax();
           if (max_sum - xub + xlb < N*xlb) { // above
@@ -245,31 +262,39 @@ public:
             int64_t maxsq = (diff) * (diff);
             if (maxsq > n3var_upr - tvar) {
               //printf("%% WE CAN PROP for ABOVE!\n");
-              long double sqrt = sqrtl((long double) n3var_upr - tvar);
-              auto sqrt_i = (int64_t) (sqrt + 0.5 - (sqrt<0));
-              //if (xub < 0) sqrt_i = -sqrt_i;
-              long double div = (long double) (sqrt_i + max_sum) / (long double) N;
-              auto upr = (int64_t) (div + 0.5 - (div<0));
-//              printf("%% -->> want to set x[%d] to %d..%lld from %d..%d \n", i, x[i]->getMin(), upr, x[i]->getMin(), x[i]->getMax());
-//              printf("%% min_var_sum = %lld,     tvar = %lld,     diff = %lld,     maxsq = %lld,     sqrt = %Lf,     sqrt_i = %lld,   div = %Lf,     n3var_upr = %lld,     n3var_upr - tvar = %lld,     max_sum = %lld\n", min_var_sum, tvar, diff, maxsq, sqrt, sqrt_i, div, n3var_upr, n3var_upr-tvar, max_sum);
+              const int reset = std::fegetround();
+              std::fesetround(FE_UPWARD);
+              //if (n3var_upr < tvar) return false;
+              long double sqrt = sqrtl((long double) maxsq - n3var_upr + tvar); // TODO check if this is the correct expression!!
+              long double div = (sqrt + max_sum) / N;
+              auto upr = (int64_t) floorl(div);
+              std::fesetround(reset);
               if(x[i]->setMaxNotR(upr)) {
-//                printf("%% !!--!! WE really CAN PROP for ABOVE!\n");
+                printf("%% saved max %lld\n", x[i]->getMax()-upr);
+//                for (int i = 0; i < N; ++i) printf("%% x[%d] = %d..%d      ", i, x[i]->getMin(), x[i]->getMax());
+//                printf("%% y = %d..%d      ", y->getMin(), y->getMax());
+//                printf("%% s = %d..%d\n", s->getMin(), s->getMax());
+//                printf("%% -->> want to set x[%d] to %d..%lld from %d..%d \n", i, x[i]->getMin(), upr, x[i]->getMin(), x[i]->getMax());
+//                printf("%% min_var_sum = %lld,     tvar = %lld,     diff = %lld,     maxsq = %lld,     sqrt = %Lf,   div = %Lf,     n3var_upr = %lld,     n3var_upr - tvar= %lld,     max_sum = %lld\n", min_var_sum, tvar, diff, maxsq, sqrt, div, n3var_upr, n3var_upr-tvar, max_sum);
                 Clause* r = nullptr;
                 if(so.lazy) {
                   // Set up reason
                   Lit lit[2*N+2];
                   int lits = 0;
                   for(int ii = 0; ii < N; ++ii) {
-                    if (ii == i) continue;
-                    lit[lits++] = x[ii]->getMinLit();
-                    lit[lits++] = x[ii]->getMaxLit();
+                    if (ii == i) {
+                      lit[lits++] = x[ii]->getMinLit();
+                    } else {
+                      lit[lits++] = x[ii]->getMinLit();
+                      lit[lits++] = x[ii]->getMaxLit();
+                    }
                   }
                   lit[lits++] = s->getMinLit();
                   lit[lits++] = s->getMaxLit();
+                  lit[lits++] = y->getMaxLit();
                   r = Reason_new(lits+1);
                   for(int ii = 0; ii < lits; ++ii) (*r)[ii+1] = lit[ii];
                 }
-                //printf("%% blab\n");
                 if(!x[i]->setMax(upr, r)) return false;
               }
             }
@@ -277,32 +302,37 @@ public:
             int64_t diff = N*xlb - min_sum;
             int64_t maxsq = (diff) * (diff);
             if (maxsq > n3var_upr - tvar) {
-              long double sqrt = sqrtl((long double) n3var_upr - tvar);
-              auto sqrt_i = (int64_t) (sqrt + 0.5 - (sqrt<0));
-              //if (xub < 0) sqrt_i = -sqrt_i;
-              long double div = (long double) (sqrt_i + max_sum) / (long double) N;
-              auto lwr = (int64_t) (div + 0.5 - (div<0));
-//              printf("%% -->> want to set x[%d] to %d..%lld from %d..%d \n", i, lwr, x[i]->getMax(), x[i]->getMin(), x[i]->getMax());
-//              printf("%% min_var_sum = %lld,     tvar = %lld,     diff = %lld,     maxsq = %lld,     sqrt = %Lf,     sqrt_i = %lld,   div = %Lf,     n3var_upr = %lld,     n3var_upr - tvar = %lld,     max_sum = %lld\n", min_var_sum, tvar, diff, maxsq, sqrt, sqrt_i, div, n3var_upr, n3var_upr-tvar, max_sum);
+              const int reset = std::fegetround();
+              std::fesetround(FE_UPWARD);
+              long double sqrt = - sqrtl((long double) n3var_upr - tvar + maxsq); // FIXME there is a bug here!
+              std::fesetround(FE_DOWNWARD);
+              long double div = (sqrt + min_sum) / (long double) N;
+              auto lwr = (int64_t) ceill(div);
+              std::fesetround(reset);
               if(x[i]->setMinNotR(lwr)) {
-//                printf("%% !!--!! WE really CAN PROP for BELOW!\n");
+                printf("%% saved min %lld\n", lwr-x[i]->getMin());
+//                printf("%% -->> want to set x[%d] to %lld..%d from %d..%d \n", i, lwr, x[i]->getMax(), x[i]->getMin(), x[i]->getMax());
+//                printf("%% min_var_sum = %lld,     tvar = %lld,     diff = %lld,     maxsq = %lld,     sqrt = %Lf,   div = %Lf,     n3var_upr = %lld,     n3var_upr - tvar = %lld,     max_sum = %lld\n", min_var_sum, tvar, diff, maxsq, sqrt, div, n3var_upr, n3var_upr-tvar, max_sum);
                 Clause* r = nullptr;
                 if(so.lazy) {
                   // Set up reason
                   Lit lit[2*N+2];
                   int lits = 0;
                   for(int ii = 0; ii < N; ++ii) {
-                    if (ii == i) continue;
-                    lit[lits++] = x[ii]->getMinLit();
-                    lit[lits++] = x[ii]->getMaxLit();
+                    if (ii == i) {
+                      lit[lits++] = x[ii]->getMaxLit();
+                    } else {
+                      lit[lits++] = x[ii]->getMinLit();
+                      lit[lits++] = x[ii]->getMaxLit();
+                    }
                   }
                   lit[lits++] = s->getMinLit();
                   lit[lits++] = s->getMaxLit();
+                  lit[lits++] = y->getMaxLit();
                   r = Reason_new(lits+1);
                   for(int ii = 0; ii < lits; ++ii) (*r)[ii+1] = lit[ii];
                 }
-                //printf("%% blab\n");
-                if(!x[i]->setMin(lwr, r)) return false;
+                //if(!x[i]->setMin(lwr, r)) return false;
               }
             }
           }
@@ -436,8 +466,12 @@ public:
     //printf("%% sqdiff = %Lf and result = %lld", sqdiff, result);
 
     // set y
-//    printf("%% want to set y to %lli when it is %d..%d\n", result, y->getMin(), y->getMax());
     if(y->setValNotR(result)) {
+//      for (int i = 0; i < N; ++i) printf("%% x[%d] = %d..%d      ", i, x[i]->getMin(), x[i]->getMax());
+//      printf("%% y = %d..%d      ", y->getMin(), y->getMax());
+//      printf("%% s = %d..%d\n", s->getMin(), s->getMax());
+//      printf("%% want to set y to %lli when it is %d..%d\n", result, y->getMin(), y->getMax());
+//      if(x[0]->getVal() == 2 && x[1]->getVal() == 1 && x[2]->getVal() == 3 && x[3]->getVal() == 2 && x[4]->getVal() == 2) printf("%% WARNING HERE WE GO!!!");
       Clause* r = nullptr;
       if(so.lazy) {
         // Set up reason
