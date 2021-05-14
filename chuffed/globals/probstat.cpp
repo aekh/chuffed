@@ -29,7 +29,7 @@ public:
     if (mode == 1) {
       for (int i = 0; i < N; i++) x[i]->attach(this, i, EVENT_LU);
       y->attach(this, N, EVENT_F);
-    } else if (mode == 2) {
+    } else if (mode == 2 || mode == 3) {
       pos.growTo(N);
       for (int i = 0; i < N; ++i) pos[i] = 2;
       for (int i = 0; i < N; i++) {
@@ -90,7 +90,7 @@ public:
 //    printf("%% y = %d..%d      ", y->getMin(), y->getMax());
 //    printf("%% s = %d..%d\n", s->getMin(), s->getMax());
 
-    if (mode == 2) {
+    if (mode == 2 || mode == 3) {
       return chop_prop();// && quick_prop();
     }
     if (mode == 1) {
@@ -180,111 +180,228 @@ public:
         if(y->setMinNotR(variance)) {
           Clause* r = nullptr;
           if(so.lazy) {
+            //printf("constraint let {array [1..%d] of set of int: x = [", N);
+            //for (int i = 0; i < N; ++i) {
+            //  printf("%d..%d", x[i]->getMin(), x[i]->getMax());
+            //  if (i < N-1) printf(",");
+            //  else printf("];");
+            //}
+            //printf("set of int: y = %d..%d", y->getMin(), y->getMax());
+            //printf("set of int: s = %d..%d", s->getMin(), s->getMax());
+            //printf("} in ");
             // Set up reason
             Lit lit[2*N+2];
             int lits = 0;
             for(int ii = 0; ii < N; ++ii) {
-              if      (m < N*x[ii]->getMin()) lit[lits++] = x[ii]->getMinLit();
-              else if (N*x[ii]->getMax() < m) lit[lits++] = x[ii]->getMaxLit();
+              if      (m < N*x[ii]->getMin()) {
+                //printf("min(x[%d]) >= %d /\\ ", ii+1, x[ii]->getMin());
+                lit[lits++] = x[ii]->getMinLit();
+              }
+              else if (N*x[ii]->getMax() < m) {
+                //printf("max(x[%d]) <= %d /\\ ", ii+1, x[ii]->getMax());
+                lit[lits++] = x[ii]->getMaxLit();
+              }
             }
-            lit[lits++] = s->getMinLit();
-            lit[lits++] = s->getMaxLit();
+            if (m == s->getMin()) {
+              //printf("min(s) >= %d /\\ ", s->getMin());
+              lit[lits++] = s->getMinLit();
+            }
+            if (m == s->getMax()) {
+              //printf("max(s) <= %d /\\ ", s->getMax());
+              lit[lits++] = s->getMaxLit();
+            }
             r = Reason_new(lits+1);
             for(int ii = 0; ii < lits; ++ii) (*r)[ii+1] = lit[ii];
           }
+          //printf("not ( min(y) >= %lld )", variance);
           if(!y->setMin(variance, r)) return false;
         }
 
-        // propagate x's
-        int64_t mins[N];
-        int64_t min_var_sum = 0;
-        for (int i = 0; i < N; ++i) { // O(N)
-          int64_t xlb = x[i]->getMin();
-          int64_t xub = x[i]->getMax();
-          int64_t Sub = max_sum_b - xub + xlb;
-          int64_t Slb = min_sum_b - xlb + xub;
-          if (Sub < N*xlb) { // above
-            int64_t diff = N*xlb - Sub;
-            mins[i] = (diff) * (diff);
-            min_var_sum += mins[i];
-          } else if (N*xub < Slb) { //below
-            int64_t diff = N*xub - Slb;
-            mins[i] = (diff) * (diff);
-            min_var_sum += mins[i];
-          } else { //overlap
-            mins[i] = 0;
-          }
-        }
+        //return true;
 
-        // TODO only perfect percision when N*N*N < scale, perhaps okay for rough percision.
+        // TODO only perfect precision when N*N*N < scale, perhaps okay for rough percision.
         std::fesetround(FE_UPWARD);
-        auto n3var_upr = (int64_t) floorl((long double) ((y->getMax()+1) * N * N * N) / (long double) scale);
+        auto n3var_upr = (int64_t) floorl(
+            (long double) ((y->getMax() + 1) * N * N * N) /
+            (long double) scale);
 
-        for (int i = 0; i < N; ++i) { // O(N)
-          int64_t remvar = min_var_sum - mins[i];
-          int64_t xlb = x[i]->getMin();
-          int64_t xub = x[i]->getMax();
-          int64_t Sub = max_sum_b - xub + xlb;
-          short above = Sub < N*xlb;
-          int64_t Slb = min_sum_b - xlb + xub;
-          short below = N*xub < Slb;
-          std::fesetround(FE_UPWARD);
-          long double sqrt = sqrtl(n3var_upr - remvar);
-          if (above) {
-            int64_t cand = max_sum;
-            if (abs(N*xub - max_sum) > abs(N*xub - Slb)) cand = min_sum;
-            std::fesetround(FE_UPWARD);
-            long double div = (cand + sqrt) / N;
-            auto upr = (int64_t) floorl(div);
-            if (n3var_upr < remvar) upr = x[i]->getMin() - 1;
-            if (x[i]->setMaxNotR(upr)) {
-              Clause *r = nullptr;
-              if (so.lazy) {
-                // Set up reason
-                Lit lit[2 * N + 2 + 2];
-                int lits = 0;
-                for (int ii = 0; ii < N; ++ii) {
-                  if (ii == i) continue;
-                  lit[lits++] = x[ii]->getMinLit();
-                  lit[lits++] = x[ii]->getMaxLit();
-                }
-                lit[lits++] = s->getMinLit();
-                lit[lits++] = s->getMaxLit();
-                lit[lits++] = y->getMaxLit();
-                r = Reason_new(lits + 1);
-                for (int ii = 0; ii < lits; ++ii) (*r)[ii + 1] = lit[ii];
-              }
-              std::fesetround(reset);
-              if (!x[i]->setMax(upr, r)) return false;
-            }
-          } if (below) {
-            int64_t cand = min_sum;
-            //if (abs(N*xlb - min_sum) > abs(N*xlb - max_sum)) cand = max_sum;
-            std::fesetround(FE_DOWNWARD);
-            long double div = (cand - sqrt) / N;
-            auto lwr = (int64_t) ceill(div);
-            if (n3var_upr < remvar) lwr = x[i]->getMax() + 1;
-            if(x[i]->setMinNotR(lwr)) {
-              Clause* r = nullptr;
-              if(so.lazy) {
-                // Set up reason
-                Lit lit[2*N+2];
-                int lits = 0;
-                for(int ii = 0; ii < N; ++ii) {
-                  if (ii == i) continue;
-                  lit[lits++] = x[ii]->getMinLit();
-                  lit[lits++] = x[ii]->getMaxLit();
-                }
-                lit[lits++] = s->getMinLit();
-                lit[lits++] = s->getMaxLit();
-                lit[lits++] = y->getMaxLit();
-                r = Reason_new(lits+1);
-                for(int ii = 0; ii < lits; ++ii) (*r)[ii+1] = lit[ii];
-              }
-              std::fesetround(reset);
-              if(!x[i]->setMin(lwr, r)) return false;
+        if (mode == 2) {
+          // propagate x's
+          int64_t mins[N];
+          int64_t min_var_sum = 0;
+          for (int i = 0; i < N; ++i) { // O(N)
+            int64_t xlb = x[i]->getMin();
+            int64_t xub = x[i]->getMax();
+            int64_t Sub = max_sum_b - xub + xlb;
+            int64_t Slb = min_sum_b - xlb + xub;
+            if (Sub < N * xlb) { // above
+              int64_t diff = N * xlb - Sub;
+              mins[i] = (diff) * (diff);
+              min_var_sum += mins[i];
+            } else if (N * xub < Slb) { //below
+              int64_t diff = N * xub - Slb;
+              mins[i] = (diff) * (diff);
+              min_var_sum += mins[i];
+            } else { //overlap
+              mins[i] = 0;
             }
           }
+
+          for (int i = 0; i < N; ++i) { // O(N)
+            int64_t remvar = min_var_sum - mins[i];
+            int64_t xlb = x[i]->getMin();
+            int64_t xub = x[i]->getMax();
+            int64_t Sub = max_sum_b - xub + xlb;
+            short above = Sub < N * xlb;
+            int64_t Slb = min_sum_b - xlb + xub;
+            short below = N * xub < Slb;
+            std::fesetround(FE_UPWARD);
+            long double sqrt = sqrtl(n3var_upr - remvar);
+            if (above) {
+              int64_t cand = max_sum;
+              if (abs(N * xub - max_sum) > abs(N * xub - Slb)) cand = min_sum;
+              std::fesetround(FE_UPWARD);
+              long double div = (cand + sqrt) / N;
+              auto upr = (int64_t) floorl(div);
+              if (n3var_upr < remvar) upr = x[i]->getMin() - 1;
+              if (x[i]->setMaxNotR(upr)) {
+                Clause *r = nullptr;
+                if (so.lazy) {
+                  // Set up reason
+                  Lit lit[2 * N + 2 + 2];
+                  int lits = 0;
+                  for (int ii = 0; ii < N; ++ii) {
+                    if (ii == i) continue;
+                    lit[lits++] = x[ii]->getMinLit();
+                    lit[lits++] = x[ii]->getMaxLit();
+                  }
+                  lit[lits++] = s->getMinLit();
+                  lit[lits++] = s->getMaxLit();
+                  lit[lits++] = y->getMaxLit();
+                  r = Reason_new(lits + 1);
+                  for (int ii = 0; ii < lits; ++ii) (*r)[ii + 1] = lit[ii];
+                }
+                std::fesetround(reset);
+                if (!x[i]->setMax(upr, r)) return false;
+              }
+            }
+            if (below) {
+              int64_t cand = min_sum;
+              //if (abs(N*xlb - min_sum) > abs(N*xlb - max_sum)) cand = max_sum;
+              std::fesetround(FE_DOWNWARD);
+              long double div = (cand - sqrt) / N;
+              auto lwr = (int64_t) ceill(div);
+              if (n3var_upr < remvar) lwr = x[i]->getMax() + 1;
+              if (x[i]->setMinNotR(lwr)) {
+                Clause *r = nullptr;
+                if (so.lazy) {
+                  // Set up reason
+                  Lit lit[2 * N + 2];
+                  int lits = 0;
+                  for (int ii = 0; ii < N; ++ii) {
+                    if (ii == i) continue;
+                    lit[lits++] = x[ii]->getMinLit();
+                    lit[lits++] = x[ii]->getMaxLit();
+                  }
+                  lit[lits++] = s->getMinLit();
+                  lit[lits++] = s->getMaxLit();
+                  lit[lits++] = y->getMaxLit();
+                  r = Reason_new(lits + 1);
+                  for (int ii = 0; ii < lits; ++ii) (*r)[ii + 1] = lit[ii];
+                }
+                std::fesetround(reset);
+                if (!x[i]->setMin(lwr, r)) return false;
+              }
+            }
+          }
+        } else { // mode is 3
+          int64_t n3s = n3var_upr - var;
+          for(int i = 0; i < N; ++i) {
+            int64_t xub = x[i]->getMax();
+            int64_t xlb = x[i]->getMin();
+
+            int64_t Sub = max_sum_b - xub + xlb;
+//            short above = Sub < N * xlb;
+            int64_t Slb = min_sum_b - xlb + xub;
+//            short below = N * xub < Slb;
+
+            //overlap M
+            if (pos[i] == 0) {
+              std::fesetround(FE_UPWARD);
+              long double sqrt = sqrtl(n3s);
+
+              int64_t Mxlb = s->getMin();
+              if (Mxlb < N*x[i]->getMin()) Mxlb = N*x[i]->getMin();
+              std::fesetround(FE_DOWNWARD);
+              auto n_xlb = (int64_t) ceill((Mxlb - sqrt) / N );
+
+              int64_t Mxub = s->getMax();
+              if (N*x[i]->getMax() < Mxub) Mxub = N*x[i]->getMax();
+              std::fesetround(FE_UPWARD);
+              auto n_xub = (int64_t) floorl((Mxub + sqrt) / N );
+
+//              if (s->getMax() > N*x[i]->getMax() + sqrt) printf("%% prune sum!\n");
+//              if (s->getMin() < N*x[i]->getMin() - sqrt) printf("%% prune sum!\n");
+
+              // explanation
+              Clause *r = nullptr;
+              if (x[i]->setMinNotR(n_xlb) || x[i]->setMaxNotR(n_xub)) {
+                if (so.lazy) {
+                  // Set up reason
+                  Lit lit[2 * N + 2];
+                  int lits = 0;
+                  for (int ii = 0; ii < N; ++ii) {
+                    if (ii == i) continue;
+                    lit[lits++] = x[ii]->getMinLit();
+                    lit[lits++] = x[ii]->getMaxLit();
+                  }
+                  lit[lits++] = s->getMinLit();
+                  lit[lits++] = s->getMaxLit();
+                  lit[lits++] = y->getMaxLit();
+                  lit[lits++] = y->getMinLit();
+                  r = Reason_new(lits + 1);
+                  for (int ii = 0; ii < lits; ++ii) (*r)[ii + 1] = lit[ii];
+                }
+              }
+
+              char b = 0;
+              if (x[i]->setMinNotR(n_xlb)) {
+//                if (y->isFixed() && y->getVal() == 187) {
+//                  if (!b) {
+//                    for (int ii = 0; ii < N; ++ii) printf("   %% x[%d] = %d..%d      ", ii, x[ii]->getMin(), x[ii]->getMax());
+//                    printf("%% y = %d..%d      ", y->getMin(), y->getMax());
+//                    printf("%% s = %d..%d\n", s->getMin(), s->getMax());
+//                    printf("%% n3var_upr = %lli,   var = %lli,   n3s = %lli\n", n3var_upr, var, n3s);
+//                    printf("%% sqrt = %Lf and Mlb - sqrt = %Lf and Mub + sqrt %Lf and nxlb = %lli and nxub = %lli\n", sqrt, (s->getMin() - sqrt), (s->getMax() + sqrt), n_xlb, n_xub);
+//                    b = 1;
+//                  }
+//                  printf("%% --> want to set x[%d] to %lli..%d when it is %d..%d\n", i, n_xlb, x[i]->getMax(), x[i]->getMin(), x[i]->getMax());
+//                }
+                std::fesetround(reset);
+                if (!x[i]->setMin(n_xlb, r)) return false;
+              }
+              if (x[i]->setMaxNotR(n_xub)) {
+//                if (y->isFixed() && y->getVal() == 187) {
+//                  if (!b) {
+//                    for (int ii = 0; ii < N; ++ii) printf("   %% x[%d] = %d..%d      ", ii, x[ii]->getMin(), x[ii]->getMax());
+//                    printf("%% y = %d..%d      ", y->getMin(), y->getMax());
+//                    printf("%% s = %d..%d\n", s->getMin(), s->getMax());
+//                    printf("%% n3var_upr = %lli,   var = %lli,   n3s = %lli\n", n3var_upr, var, n3s);
+//                    printf("%% sqrt = %Lf and Mlb - sqrt = %Lf and Mub + sqrt %Lf and nxlb = %lli and nxub = %lli\n", sqrt, (s->getMin() - sqrt), (s->getMax() + sqrt), n_xlb, n_xub);
+//                  }
+//                  printf("%% --> want to set x[%d] to %d..%lli when it is %d..%d\n", i, x[i]->getMin(), n_xub, x[i]->getMin(), x[i]->getMax());
+//                }
+                std::fesetround(reset);
+                if (!x[i]->setMax(n_xub, r)) return false;
+              }
+            }
+
+            //above M
+
+            //below M
+          }
+
+
         }
         std::fesetround(reset);
         return true;
