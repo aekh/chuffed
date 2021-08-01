@@ -2,6 +2,10 @@
 #include <stdlib.h>
 #include <cfenv>
 
+#include <iostream>
+
+using namespace std;
+
 //int ccc = 0;
 
 class VarianceInt : public Propagator {
@@ -53,6 +57,7 @@ public:
       case 2: // version 1 approx c
       case 3: // version 2
       case 4: // version 2 approx c
+      case 5: // only lb var
         init_v1v2();
         break;
       default: // checking x, filter v
@@ -90,6 +95,8 @@ public:
         return prop_var_lb()  &&  prop_x_v2();
       case 4: // version 2 approx c
         return prop_var_lb()  &&  prop_x_v2x();
+      case 5:
+        return prop_var_lb();
       default: // checking x, filter v
         return checking_prop();
     }
@@ -341,20 +348,86 @@ public:
   }
 
   bool prop_x_v1() {
-//    printf("%% running prop_x_v1\n");
-//    if (all_fixed) return checking_prop();
+    int n_AuB = N;
+    for (int j = 0; j < N; j++) {
+      assert(pos[j] != 2);
+      if (pos[j] == 0) n_AuB--;
+    }
+
+    int64_t a = N*N - 2*N + n_AuB;
+
+    int64_t b_lb = 0;
+    for (int j = 0; j < N; ++j) {
+      if (j != 0) b_lb += n_AuB * x[j]->getMin();
+      if (pos[j] == 0) b_lb += 2 * N * x[j]->getMin();
+    }
+
+    int64_t b_ub = 0;
+    for (int j = 0; j < N; ++j) {
+      if (j != 0) b_ub += n_AuB * x[j]->getMax();
+      if (pos[j] == 0) b_ub += 2 * N * x[j]->getMax();
+    }
+
+    // explanation
+    Clause *r = nullptr;
+    if (so.lazy) {
+      // Set up reason
+      Lit lit[2 * N + 3];
+      int lits = 0;
+
+      // For using all x's ub's and lb's
+      for(int ii = 0; ii < N; ++ii) {
+        lit[lits++] = x[ii]->getMinLit();
+        lit[lits++] = x[ii]->getMaxLit();
+      }
+
+      // For using VxU
+      lit[lits++] = y->getMaxLit();
+
+      // For using pos[], double-check if necessary
+      lit[lits++] = s->getMinLit();
+      lit[lits++] = s->getMaxLit();
+
+      r = Reason_new(lits + 1);
+      for (int ii = 0; ii < lits; ++ii) (*r)[ii + 1] = lit[ii];
+    }
 
     for (int i = 0; i < N; i++) {
-      assert(pos[i] != 2);
-
       // overlap
+
+//      assert(false && "not implemented yet");
+
       if (pos[i] == 0) {
         if (!prop_x_v1_O(i)) return false;
       }
+      else if (pos[i] == -1 or pos[i] == 1) {
+        int64_t c_lb = 0;
+        int64_t term1 = 0;
+        int64_t term2 = 0;
+        for (int j = 0; j < N; ++j) {
+          if (j != 0) term1 += x[j]->getMin();
+        }
+        term1 *= term1;
 
-      // above or below
-      else {
-        if (!prop_x_v1_AB(i)) return false;
+        for (int j = 0; j < N; ++j) {
+          if (pos[j] == 0) continue;
+
+          int64_t sq = INT64_MAX;
+          for (int jj = 0; (jj < 4) && (pos[j] == -1 || pos[j] == 1); jj++) {
+            int64_t temp = 0;
+            if (jj == 0 || jj == 1) temp = s->getMin();
+            else                    temp = s->getMax();
+            if (jj == 0 || jj == 2) temp = N * x[i]->getMax() - temp;
+            else                    temp = N * x[i]->getMin() - temp;
+            temp *= temp;
+            if (temp < sq) sq = temp;
+          }
+          term2 += sq;
+        }
+
+        c_lb = term1 + term2;
+
+        if (!prop_x_v1x_AB(i, n_AuB, a, b_lb, b_ub, c_lb, r)) return false;
       }
     }
     return true;
@@ -373,15 +446,15 @@ public:
         (long double) ((int64_t) (y->getMax() + 1) * N * N * N) /
         (long double) scale);
     auto sqrtK = sqrtl(VxU - (long double) Vx);
-    auto x_lb = (int) ceil( (Lx - sqrtK ) / N);
+    auto x_lb = (int64_t) ceil( (Lx - sqrtK ) / N);
 
     auto Ux = fmax((long double) (N*x[i]->getMax()),
                    (long double) s->getMax());
     std::fesetround(FE_DOWNWARD);
-    auto x_ub = (int) floor( (Ux + sqrtK) / N);
+    auto x_ub = (int64_t) floor( (Ux + sqrtK) / N);
 
-    printf("%%\t Ux = %LF, VxU = %LF, sqrtK = %LF, x_ub = %d, yGetMax = %LF, scale = %LF, y->getMax() = %d, Vx = %lld, N = %d, y->getMin() = %d\n",
-        Ux, VxU, sqrtK, x_ub, (long double) ((int64_t) (y->getMax() + 1) * N * N * N), (long double) scale, y->getMax(), Vx.v, N, y->getMin());
+//    printf("%%\t Ux = %LF, VxU = %LF, sqrtK = %LF, x_ub = %d, yGetMax = %LF, scale = %LF, y->getMax() = %d, Vx = %lld, N = %d, y->getMin() = %d\n",
+//        Ux, VxU, sqrtK, x_ub, (long double) ((int64_t) (y->getMax() + 1) * N * N * N), (long double) scale, y->getMax(), Vx.v, N, y->getMin());
 
     // explanation
     Clause *r = nullptr;
@@ -422,8 +495,8 @@ public:
     if (x[i]->setMinNotR(x_lb)) {
       std::fesetround(reset);
       if (!x[i]->setMin(x_lb, r)) {
-        printf("%%\t lb false\n");
-        printf("%%\t lb is %d want to set to %d\n", x[i]->getMin(), x_lb);
+//        printf("%%\t lb false\n");
+//        printf("%%\t lb is %d want to set to %d\n", x[i]->getMin(), x_lb);
         n_incons_x_overlap++;
         return false;
       }
@@ -431,8 +504,8 @@ public:
     if (x[i]->setMaxNotR(x_ub)) {
       std::fesetround(reset);
       if (!x[i]->setMax(x_ub, r)) {
-        printf("%%\t ub false\n");
-        printf("%%\t ub is %d want to set to %d\n", x[i]->getMax(), x_ub);
+//        printf("%%\t ub false\n");
+//        printf("%%\t ub is %d want to set to %d\n", x[i]->getMax(), x_ub);
         n_incons_x_overlap++;
         return false;
       }
@@ -448,15 +521,14 @@ public:
   // Version 1 Approx // mode = 2
   //------------------//
 
-  bool prop_x_v1x(){
-//    printf("%% running prop_x_v1x\n");
-//    if (all_fixed) return checking_prop();
-
+  bool prop_x_v1x() {
     int n_AuB = N;
     for (int j = 0; j < N; j++) {
       assert(pos[j] != 2);
       if (pos[j] == 0) n_AuB--;
     }
+
+    int64_t a = N*N - 2*N + n_AuB;
 
     int64_t b_lb = 0;
     for (int j = 0; j < N; ++j) {
@@ -466,8 +538,8 @@ public:
 
     int64_t b_ub = 0;
     for (int j = 0; j < N; ++j) {
-      if (j != 0) b_lb += n_AuB * x[j]->getMax();
-      if (pos[j] == 0) b_lb += 2 * N * x[j]->getMax();
+      if (j != 0) b_ub += n_AuB * x[j]->getMax();
+      if (pos[j] == 0) b_ub += 2 * N * x[j]->getMax();
     }
 
     int64_t c_lb = 0;
@@ -483,7 +555,7 @@ public:
     Clause *r = nullptr;
     if (so.lazy) {
       // Set up reason
-      Lit lit[2 * N + 1];
+      Lit lit[2 * N + 3];
       int lits = 0;
 
       // For using all x's ub's and lb's
@@ -494,6 +566,10 @@ public:
 
       // For using VxU
       lit[lits++] = y->getMaxLit();
+
+      // For using pos[], double-check if necessary
+      lit[lits++] = s->getMinLit();
+      lit[lits++] = s->getMaxLit();
 
       r = Reason_new(lits + 1);
       for (int ii = 0; ii < lits; ++ii) (*r)[ii + 1] = lit[ii];
@@ -513,19 +589,17 @@ public:
           b_ub -= n_AuB * x[i]->getMax();
           b_ub += n_AuB * x[i-1]->getMax();
         }
-        if (!prop_x_v1x_AB(i, n_AuB, b_lb, b_ub, c_lb, r)) return false;
+        if (!prop_x_v1x_AB(i, n_AuB, a, b_lb, b_ub, c_lb, r)) return false;
       }
     }
     return true;
   }
 
-  bool prop_x_v1x_AB(int i, int n_AuB, int64_t b_lb, int64_t b_ub,
+  bool prop_x_v1x_AB(int i, int n_AuB, int64_t a, int64_t b_lb, int64_t b_ub,
       int64_t c_lb, Clause *r) {
 //    printf("%% running prop_x_v1x_AB\n");
 
     const int reset = std::fegetround();
-
-    int64_t a = N^2 - 2*N + n_AuB;
 
     std::fesetround(FE_UPWARD);
     auto VxU = floorl(
@@ -535,33 +609,122 @@ public:
     auto sqrtExprU = sqrtl(4*a*VxU + 4*a*c_lb + b_ub*b_ub);
 
     std::fesetround(FE_DOWNWARD);
-    auto x_lb = (int) ceill( (-sqrtExprL - b_ub) / 2*a);
+    auto x_lb = (int64_t) ceill( (-sqrtExprL - b_ub) / 2*a);
 
     std::fesetround(FE_UPWARD);
-    auto x_ub = (int) floorl( (sqrtExprU - b_lb) / 2*a);
+    auto x_ub = (int64_t) floorl( (sqrtExprU - b_lb) / 2*a);
 
     // Prune
     if (x[i]->setMinNotR(x_lb) || x[i]->setMaxNotR(x_ub)) {
-      if (pos[i] == 1) n_prop_x_above++;
+      if (pos[i] == 1) { n_prop_x_above++; cout << "%% v1x_AB x_lb/ub prop\n"; }
       else if (pos[i] == -1) n_prop_x_below++;
+      else if (pos[i] == 0) n_prop_x_overlap++;
     }
+
+//    if (x_lb <= INT64_MIN) CHUFFED_ERROR("Spread constraint may underflow, not yet supported");
+//    if (x_ub >= INT64_MAX) CHUFFED_ERROR("Spread constraint may overflow, not yet supported");
 
     if (x[i]->setMinNotR(x_lb)) {
       std::fesetround(reset);
       if (!x[i]->setMin(x_lb, r)) {
-        if (pos[i] == 1) n_incons_x_above++;
+        cerr << "constraint (";
+
+        // For using all x's ub's and lb's
+        for(int ii = 0; ii < N; ++ii) {
+          cerr << "X[" << ii+1 << "] >= " << x[ii]->getMin()
+               << " /\\ "
+               << "X[" << ii+1 << "] <= " << x[ii]->getMax()
+               << " /\\ ";
+        }
+
+        // For using VxU
+        cerr << "v <= " << y->getMax();
+
+        // Not needed!?!?
+        cerr << " /\\ "
+             << "v >= " << y->getMin()
+             << " /\\ "
+             << "S >= " << s->getMin()
+             << " /\\ "
+             << "S <= " << s->getMax();
+
+        // Finish
+        cerr << ") -> ("
+             << "X[" << i+1 << "] >= " << x_lb
+             << "); % ";
+
+        for (int i = 0; i < N; ++i) {
+          cerr << "pos[X[" << i+1 << "]] = " << pos[0];
+        }
+
+        cerr << ", Vx = " << Vx.v
+             << ", VxU = " << VxU
+             << ", Mx = " << Mx.v
+             << ", MxR = " << MxR.v
+             << ", a = " << a
+             << ", b" << i << "_lb = " << b_lb
+             << ", b" << i << "_ub = " << b_ub
+             << ", c" << i << "_lb = " << c_lb
+             << endl;
+//
+        if (pos[i] == 1) { n_incons_x_above++;  cout << "%% v1x_AB x_lb FAIL\n"; }
         else if (pos[i] == -1) n_incons_x_below++;
+        else if (pos[i] == 0) n_incons_x_overlap++;
         return false;
       }
     }
-//    if (x[i]->setMaxNotR(x_ub)) {
-//      std::fesetround(reset);
-//      if (!x[i]->setMax(x_ub, r)) {
-//        if (pos[i] == 1) n_incons_x_above++;
-//        else if (pos[i] == -1) n_incons_x_below++;
-//        return false;
-//      }
-//    }
+    if (x[i]->setMaxNotR(x_ub)) {
+      std::fesetround(reset);
+//      if (pos[i] == 1) { n_prop_x_above++;  cout << "%% v1x_AB x_ub prop\n"; }
+//      else if (pos[i] == -1) n_prop_x_below++;
+//      else if (pos[i] == 0) n_prop_x_overlap++;
+      if (!x[i]->setMax(x_ub, r)) {
+        cerr << "constraint (";
+
+        // For using all x's ub's and lb's
+        for(int ii = 0; ii < N; ++ii) {
+          cerr << "X[" << ii+1 << "] >= " << x[ii]->getMin()
+               << " /\\ "
+               << "X[" << ii+1 << "] <= " << x[ii]->getMax()
+               << " /\\ ";
+        }
+
+        // For using VxU
+        cerr << "v <= " << y->getMax();
+
+        // Not needed!?!?
+        cerr << " /\\ "
+             << "v >= " << y->getMin()
+             << " /\\ "
+             << "S >= " << s->getMin()
+             << " /\\ "
+             << "S <= " << s->getMax();
+
+        // Finish
+        cerr << ") -> ("
+             << "X[" << i+1 << "] >= " << x_lb
+             << "); % ";
+
+        for (int i = 0; i < N; ++i) {
+          cerr << "pos[X[" << i+1 << "]] = " << pos[0];
+        }
+
+        cerr << ", Vx = " << Vx.v
+             << ", VxU = " << VxU
+             << ", Mx = " << Mx.v
+             << ", MxR = " << MxR.v
+             << ", a = " << a
+             << ", b" << i << "_lb = " << b_lb
+             << ", b" << i << "_ub = " << b_ub
+             << ", c" << i << "_lb = " << c_lb
+             << endl;
+
+        if (pos[i] == 1) { n_incons_x_above++; cout << "%% v1x_AB x_ub FAIL\n"; }
+        else if (pos[i] == -1) n_incons_x_below++;
+        else if (pos[i] == 0) n_incons_x_overlap++;
+        return false;
+      }
+    }
     return true;
   }
 
@@ -578,7 +741,71 @@ public:
   //------------------//
 
   bool prop_x_v2x(){
-    assert(false && "TODO, not implemented yet");
+    int64_t a = N*N - N;
+
+    int64_t b_lb = 0;
+    for (int j = 1; j < N; ++j) {
+      if (N > 2) b_lb += (2 - N) * x[j]->getMax();
+      else if (N < 2) b_lb += (2 - N) * x[j]->getMin();
+    }
+
+    int64_t b_ub = 0;
+    for (int j = 1; j < N; ++j) {
+      if (N > 2) b_ub += (2 - N) * x[j]->getMin();
+      else if (N < 2) b_ub += (2 - N) * x[j]->getMax();
+    }
+
+    int64_t c_lb = 0;
+    int max_lb_x = 0;
+    for (int j = 0; j < N; ++j) {
+      if (x[j]->getMin() > max_lb_x) max_lb_x = x[j]->getMin();
+      c_lb += x[j]->getMin();
+    }
+    c_lb -= max_lb_x;
+    c_lb = c_lb * c_lb;
+
+    // explanation
+    Clause *r = nullptr;
+    if (so.lazy) {
+      // Set up reason
+      Lit lit[2 * N + 3];
+      int lits = 0;
+
+      // For using all x's ub's and lb's
+      for(int ii = 0; ii < N; ++ii) {
+        lit[lits++] = x[ii]->getMinLit();
+        lit[lits++] = x[ii]->getMaxLit();
+      }
+
+      // For using VxU
+      lit[lits++] = y->getMaxLit();
+
+      // For using pos[], double-check if necessary
+      lit[lits++] = s->getMinLit();
+      lit[lits++] = s->getMaxLit();
+
+      r = Reason_new(lits + 1);
+      for (int ii = 0; ii < lits; ++ii) (*r)[ii + 1] = lit[ii];
+    }
+
+    for (int i = 0; i < N; i++) {
+      if (i > 0) {
+        if (N > 2) {
+          b_lb -= (2 - N) * x[i]->getMax();
+          b_lb += (2 - N) * x[i-1]->getMax();
+          b_ub -= (2 - N) * x[i]->getMin();
+          b_ub += (2 - N) * x[i-1]->getMin();
+        }
+        else if (N < 2) {
+          b_lb -= (2 - N) * x[i]->getMin();
+          b_lb += (2 - N) * x[i-1]->getMin();
+          b_ub -= (2 - N) * x[i]->getMax();
+          b_ub += (2 - N) * x[i-1]->getMax();
+        }
+      }
+      if (!prop_x_v1x_AB(i, 0, a, b_lb, b_ub, c_lb, r)) return false;
+    }
+    return true;
   }
 
   bool prop_x() {
