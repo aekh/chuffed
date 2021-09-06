@@ -27,6 +27,7 @@ public:
   Tint64_t MxR; // highest sum of lb n^3 variance
   Tint64_t Vx; // lb n^3 variance
   Tint all_fixed; // true if all x are fixed
+  Tint one_fixed;
   Tint subsumed;
 
   // Statistics
@@ -38,17 +39,27 @@ public:
   uint64_t n_incons_v_fix;
   uint64_t n_prop_x_above;
   uint64_t n_incons_x_above;
+  int64_t x_above_max_strength;
   uint64_t n_prop_x_below;
   uint64_t n_incons_x_below;
+  int64_t x_below_max_strength;
   uint64_t n_prop_x_overlap;
   uint64_t n_incons_x_overlap;
+  int64_t x_overlap_max_strength;
+  uint64_t n_prop_x;
+  uint64_t n_incons_x;
+  uint64_t n_prop_v;
+  uint64_t n_incons_v;
 
   VarianceInt(IntVar *_y, vec<IntVar *> &_x, IntVar *_s, int _scale, int _mode) :
       N(_x.size()), y(_y), x(_x), s(_s), scale(_scale), mode(_mode),
       n_wakeups(0), n_runs(0), n_prop_v_lb(0), n_incons_v_lb(0),
       n_prop_v_fix(0), n_incons_v_fix(0), n_prop_x_above(0),
       n_incons_x_above(0), n_prop_x_below(0), n_incons_x_below(0),
-      n_prop_x_overlap(0), n_incons_x_overlap(0) {
+      n_prop_x_overlap(0), n_incons_x_overlap(0), n_prop_x(0), n_incons_x(0),
+      n_prop_v(0), n_incons_v(0),
+      x_above_max_strength(INT64_MIN), x_below_max_strength(INT64_MIN),
+      x_overlap_max_strength(INT64_MIN) {
     priority = 3;
     all_fixed = 0;
     subsumed = 0;
@@ -58,7 +69,12 @@ public:
       case 3: // version 2
       case 4: // version 2 approx c
       case 5: // only lb var
+      case 7: // smart
+      case 8: // only new lb var
         init_v1v2();
+        break;
+      case 6:
+        init_dc();
         break;
       default: // checking x, filter v
         init_checking();
@@ -68,8 +84,8 @@ public:
   void wakeup(int i, int c) override {
     if (subsumed) return;
     n_wakeups++;
-    //if (i == N+1 && )
-    if (all_fixed == 0 && (c & EVENT_F || c & EVENT_LF || c & EVENT_UF)) {
+    if (all_fixed == 0 && i < N
+                       && (c & EVENT_F || c & EVENT_LF || c & EVENT_UF)) {
       int all_fixed_ = 1;
       for (int i = 0; i < N; i++) { // O(N)
         if (!x[i]->isFixed()) {
@@ -85,7 +101,7 @@ public:
   bool propagate() override {
 //    printf("%% running propagate\n");
     n_runs++;
-    if (all_fixed) return checking_prop();
+    if (all_fixed && mode != 6) return checking_prop();
     switch (mode) {
       case 1: // version 1
         return prop_var_lb()  &&  prop_x_v1();
@@ -97,6 +113,10 @@ public:
         return prop_var_lb()  &&  prop_x_v2x();
       case 5:
         return prop_var_lb();
+      case 6:
+        return prop_x_dc();
+      case 7:
+        return prop_var_lb()  &&  prop_x_v7();
       default: // checking x, filter v
         return checking_prop();
     }
@@ -108,16 +128,27 @@ public:
     fprintf(stderr, ":\n");
     fprintf(stderr, "%%\t#wakeups: %lld\n", n_wakeups);
     fprintf(stderr, "%%\t#runs: %lld\n", n_runs);
+    fprintf(stderr, "%%\t#prop var: %lld\n", n_prop_v);
+    fprintf(stderr, "%%\t#fail var: %lld\n", n_incons_v);
     fprintf(stderr, "%%\t#prop var lb: %lld\n", n_prop_v_lb);
     fprintf(stderr, "%%\t#fail var lb: %lld\n", n_incons_v_lb);
     fprintf(stderr, "%%\t#prop var fixed x: %lld\n", n_prop_v_fix);
     fprintf(stderr, "%%\t#fail var fixed x: %lld\n", n_incons_v_fix);
+    fprintf(stderr, "%%\t#prop x: %lld\n", n_prop_x);
+    fprintf(stderr, "%%\t#fail x: %lld\n", n_incons_x);
     fprintf(stderr, "%%\t#prop x above: %lld\n", n_prop_x_above);
     fprintf(stderr, "%%\t#fail x above: %lld\n", n_incons_x_above);
+    fprintf(stderr, "%%\t#x above max strength: %lld\n", x_above_max_strength);
     fprintf(stderr, "%%\t#prop x below: %lld\n", n_prop_x_below);
     fprintf(stderr, "%%\t#fail x below: %lld\n", n_incons_x_below);
+    fprintf(stderr, "%%\t#x below max strength: %lld\n", x_below_max_strength);
     fprintf(stderr, "%%\t#prop x overlap: %lld\n", n_prop_x_overlap);
     fprintf(stderr, "%%\t#fail x overlap: %lld\n", n_incons_x_overlap);
+    fprintf(stderr, "%%\t#x overlap max strength: %lld\n", x_overlap_max_strength);
+  }
+
+  int64_t lli_max(int64_t a, int64_t b) {
+    return a > b ? a : b;
   }
 
   //------------------//
@@ -409,7 +440,7 @@ public:
         }
         term1 *= term1;
 
-        for (int j = 0; j < N; ++j) {
+        for (int j = 0; j < N; ++j) { // TODO: FIXME: ERRORS!
           if (pos[j] == 0) continue;
 
           int64_t sq = INT64_MAX;
@@ -434,8 +465,6 @@ public:
   }
 
   bool prop_x_v1_O(int i) {
-//    printf("%% running prop_x_v1_O\n");
-
     const int reset = std::fegetround();
 
     std::fesetround(FE_DOWNWARD);
@@ -492,6 +521,8 @@ public:
     }
 
     // prune
+
+    x_overlap_max_strength = lli_max(x_overlap_max_strength, x_lb - x[i]->getMin());
     if (x[i]->setMinNotR(x_lb)) {
       std::fesetround(reset);
       if (!x[i]->setMin(x_lb, r)) {
@@ -501,6 +532,7 @@ public:
         return false;
       }
     }
+    x_overlap_max_strength = lli_max(x_overlap_max_strength, x[i]->getMax() - x_ub);
     if (x[i]->setMaxNotR(x_ub)) {
       std::fesetround(reset);
       if (!x[i]->setMax(x_ub, r)) {
@@ -614,6 +646,23 @@ public:
     std::fesetround(FE_UPWARD);
     auto x_ub = (int64_t) floorl( (sqrtExprU - b_lb) / 2*a);
 
+//    cout << "\n%% x_lb's sqrtExprL = sqrtl(4*" << a << "*" << VxU << " + 4*" << a << "*" << c_lb << " + " << b_ub << "*" << b_ub << ")"
+//         << "\n%% x_ub's sqrtExprU = sqrtl(4*" << a << "*" << VxU << " + 4*" << a << "*" << c_lb << " + " << b_ub << "*" << b_ub << ")"
+//         << "\n%% x_lb = ceill( (-" << sqrtExprU << " - " << b_ub << " / 2*" << a << ")"
+//         << "\n%% x_ub = floorl( (" << sqrtExprU << " - " << b_lb << " / 2*" << a << ")"
+//         << endl
+//         << "%% We try to propagate: "
+//         << x_lb << " <= " << x[i]->getMin() << " <= X[" << i+1 << "] <= "
+//         << x[i]->getMax() << " <= " << x_ub << "\n % \n %" << endl;
+
+    // Strength
+    if (pos[i] == -1) x_below_max_strength = lli_max(x_below_max_strength, x_lb - x[i]->getMin());
+    if (pos[i] == -1) x_below_max_strength = lli_max(x_below_max_strength, x[i]->getMax() - x_ub);
+    if (pos[i] == 0) x_overlap_max_strength = lli_max(x_overlap_max_strength, x_lb - x[i]->getMin());
+    if (pos[i] == 0) x_overlap_max_strength = lli_max(x_overlap_max_strength, x[i]->getMax() - x_ub);
+    if (pos[i] == 1) x_above_max_strength = lli_max(x_above_max_strength, x_lb - x[i]->getMin());
+    if (pos[i] == 1) x_above_max_strength = lli_max(x_above_max_strength, x[i]->getMax() - x_ub);
+
     // Prune
     if (x[i]->setMinNotR(x_lb) || x[i]->setMaxNotR(x_ub)) {
       if (pos[i] == 1) { n_prop_x_above++; cout << "%% v1x_AB x_lb/ub prop\n"; }
@@ -629,43 +678,43 @@ public:
       if (!x[i]->setMin(x_lb, r)) {
         cerr << "constraint (";
 
-        // For using all x's ub's and lb's
-        for(int ii = 0; ii < N; ++ii) {
-          cerr << "X[" << ii+1 << "] >= " << x[ii]->getMin()
-               << " /\\ "
-               << "X[" << ii+1 << "] <= " << x[ii]->getMax()
-               << " /\\ ";
-        }
-
-        // For using VxU
-        cerr << "v <= " << y->getMax();
-
-        // Not needed!?!?
-        cerr << " /\\ "
-             << "v >= " << y->getMin()
-             << " /\\ "
-             << "S >= " << s->getMin()
-             << " /\\ "
-             << "S <= " << s->getMax();
-
-        // Finish
-        cerr << ") -> ("
-             << "X[" << i+1 << "] >= " << x_lb
-             << "); % ";
-
-        for (int i = 0; i < N; ++i) {
-          cerr << "pos[X[" << i+1 << "]] = " << pos[0];
-        }
-
-        cerr << ", Vx = " << Vx.v
-             << ", VxU = " << VxU
-             << ", Mx = " << Mx.v
-             << ", MxR = " << MxR.v
-             << ", a = " << a
-             << ", b" << i << "_lb = " << b_lb
-             << ", b" << i << "_ub = " << b_ub
-             << ", c" << i << "_lb = " << c_lb
-             << endl;
+//        // For using all x's ub's and lb's
+//        for(int ii = 0; ii < N; ++ii) {
+//          cerr << "X[" << ii+1 << "] >= " << x[ii]->getMin()
+//               << " /\\ "
+//               << "X[" << ii+1 << "] <= " << x[ii]->getMax()
+//               << " /\\ ";
+//        }
+//
+//        // For using VxU
+//        cerr << "v <= " << y->getMax();
+//
+//        // Not needed!?!?
+//        cerr << " /\\ "
+//             << "v >= " << y->getMin()
+//             << " /\\ "
+//             << "S >= " << s->getMin()
+//             << " /\\ "
+//             << "S <= " << s->getMax();
+//
+//        // Finish
+//        cerr << ") -> ("
+//             << "X[" << i+1 << "] >= " << x_lb
+//             << "); % ";
+//
+//        for (int i = 0; i < N; ++i) {
+//          cerr << "pos[X[" << i+1 << "]] = " << pos[0];
+//        }
+//
+//        cerr << ", Vx = " << Vx.v
+//             << ", VxU = " << VxU
+//             << ", Mx = " << Mx.v
+//             << ", MxR = " << MxR.v
+//             << ", a = " << a
+//             << ", b" << i << "_lb = " << b_lb
+//             << ", b" << i << "_ub = " << b_ub
+//             << ", c" << i << "_lb = " << c_lb
+//             << endl;
 //
         if (pos[i] == 1) { n_incons_x_above++;  cout << "%% v1x_AB x_lb FAIL\n"; }
         else if (pos[i] == -1) n_incons_x_below++;
@@ -732,8 +781,105 @@ public:
   // Version 2 // mode = 3
   //-----------//
 
-  bool prop_x_v2(){
-    assert(false && "TODO, not implemented yet");
+  bool prop_x_v2() {
+    int64_t a = N*N - N;
+
+    int64_t b_lb = 0;
+    for (int j = 1; j < N; ++j) {
+      if (N > 2) b_lb += (2 - N) * x[j]->getMax();
+      else if (N < 2) b_lb += (2 - N) * x[j]->getMin();
+    }
+
+    int64_t b_ub = 0;
+    for (int j = 1; j < N; ++j) {
+      if (N > 2) b_ub += (2 - N) * x[j]->getMin();
+      else if (N < 2) b_ub += (2 - N) * x[j]->getMax();
+    }
+
+    // explanation
+    Clause *r = nullptr;
+    if (so.lazy) {
+      // Set up reason
+      Lit lit[2 * N + 3];
+      int lits = 0;
+
+      // For using all x's ub's and lb's
+      for(int ii = 0; ii < N; ++ii) {
+        lit[lits++] = x[ii]->getMinLit();
+        lit[lits++] = x[ii]->getMaxLit();
+      }
+
+      // For using VxU
+      lit[lits++] = y->getMaxLit();
+
+      // For using pos[], double-check if necessary
+      lit[lits++] = s->getMinLit();
+      lit[lits++] = s->getMaxLit();
+
+      r = Reason_new(lits + 1);
+      for (int ii = 0; ii < lits; ++ii) (*r)[ii + 1] = lit[ii];
+    }
+
+    for (int i = 0; i < N; i++) {
+      if (i > 0) {
+        if (N > 2) {
+          b_lb -= (2 - N) * x[i]->getMax();
+          b_lb += (2 - N) * x[i-1]->getMax();
+          b_ub -= (2 - N) * x[i]->getMin();
+          b_ub += (2 - N) * x[i-1]->getMin();
+        }
+        else if (N < 2) {
+          b_lb -= (2 - N) * x[i]->getMin();
+          b_lb += (2 - N) * x[i-1]->getMin();
+          b_ub -= (2 - N) * x[i]->getMax();
+          b_ub += (2 - N) * x[i-1]->getMax();
+        }
+      }
+      int64_t c_lb = 0;
+      int64_t term1 = 0;
+      int64_t term2 = 0;
+      for (int j = 0; j < N; ++j) {
+        if (j != 0) term1 += x[j]->getMin();
+      }
+      term1 *= term1;
+
+//      for (int j = 0; j < N; ++j) {
+//        if (i == j) continue;
+//
+//        int64_t sq = INT64_MAX;
+//        for (int jj = 0; jj < 4; jj++) {
+//          int64_t temp = 0;
+//          if (jj == 0 || jj == 1) temp = s->getMin() - x[i]->getMin();
+//          else                    temp = s->getMax() - x[i]->getMax();
+//          if (jj == 0 || jj == 2) temp = N * x[j]->getMax() - temp;
+//          else                    temp = N * x[j]->getMin() - temp;
+//          temp *= temp;
+//          if (temp < sq) sq = temp;
+//        }
+//        term2 += sq;
+//      }
+
+//      cout << "% next: var for " << i << " of " << N-1 <<  endl;
+      for (int64_t sum = s->getMin() - x[i]->getMin();
+             sum <= s->getMax() - x[i]->getMax(); ++sum) {
+//        cout << "sum = " << sum << endl;
+        int64_t temp = 0;
+        for (int ii = 0; ii < N; ++ii) {
+          if (i == ii) continue;
+          int64_t lb = N * x[ii]->getMin(), ub = N * x[ii]->getMax();
+          if (sum < lb)      temp += (lb - sum) * (lb - sum);
+          else if (ub < sum) temp += (ub - sum) * (ub - sum);
+        }
+        if (temp < term2) term2 = temp;
+      }
+//      cout << "% var done for " << i << " of " << N-1 << endl;
+
+      c_lb = term1 + term2;
+
+      if (!prop_x_v1x_AB(i, 0, a, b_lb, b_ub, c_lb, r)) return false;
+//      cout << "% prop_x_v1x_AB done for " << i << " of " << N-1 << endl;
+    }
+    return true;
   }
 
   //------------------//
@@ -807,6 +953,269 @@ public:
     }
     return true;
   }
+
+  //------------//
+  // DC Version // mode = 6
+  //------------//
+
+  void init_dc() {
+    pos.growTo(N);
+    for (int i = 0; i < N; ++i) pos[i] = 2;
+    for (int i = 0; i < N; i++) {
+      x[i]->attach(this, i, EVENT_C);
+    }
+    y->attach(this, N, EVENT_C);
+    s->attach(this, N+1, EVENT_LU);
+  }
+
+  bool prop_x_dc(){
+//    cout << "dc:\n\tinit" << endl;
+
+    // Initialize
+    vec<vec<bool> > support;
+    vec<vec<int64_t> > val;
+    vec<int64_t> idx;
+    for (int i = 0; i <= N; ++i) {
+      support.push(vec<bool>());
+      val.push(vec<int64_t>());
+      idx.push(0);
+      int64_t vlb = (i < N) ? x[i]->getMin() : y->getMin();
+      int64_t vub = (i < N) ? x[i]->getMax() : y->getMax();
+      for (int64_t ii = 0; ii + vlb <= vub; ++ii) {
+        support[i].push(false);
+        val[i].push(vlb + ii);
+      }
+    }
+
+//    cout << "\ttry all comb" << endl;
+    // Try all combinations
+    bool not_done = true;
+    while (not_done) {
+
+      // Try combination
+      int64_t sumx = 0;
+      for (int i = 0; i < N; i++) sumx += val[i][idx[i]];
+
+      int64_t sqdiff = 0;
+      for (int i = 0; i < N; i++) {
+        int64_t diff = N * val[i][idx[i]] - sumx;
+        sqdiff += diff * diff;
+      }
+
+      long double result_f = (long double) sqdiff / (long double) (N*N*N);
+      int64_t result = (int64_t) (result_f * scale);
+
+      if (result == val[N][idx[N]]) {
+        for (int i = 0; i <= N; ++i) {
+          support[i][idx[i]] = true;
+        }
+      }
+
+      // Increment to next combination
+      for (int i = 0; i <= N; ++i) {
+        if (i == N && val[i][idx[i]] == y->getMax()) {
+          not_done = false;
+          break;
+        } else if (i != N && val[i][idx[i]] == x[i]->getMax()) {
+          idx[i] = 0;
+        } else {
+          ++idx[i];
+          break;
+        }
+      }
+    }
+
+//    cout << "\tfull expl" << endl;
+    // Full explanation
+    Clause *r = nullptr;
+    if (so.lazy) {
+      vec<Lit> lits;
+
+      // All-encompassing reason
+      for (int i = 0; i < N; ++i) {
+        lits.push(x[i]->getMinLit());
+        lits.push(x[i]->getMaxLit());
+        for (int64_t val = x[i]->getMin()+1; val < x[i]->getMax(); ++val) {
+          if(!x[i]->indomain(val)) lits.push(*x[i] != val);
+        }
+      }
+      lits.push(y->getMinLit());
+      lits.push(y->getMaxLit());
+      for (int64_t val = y->getMin()+1; val < y->getMax(); ++val) {
+        if(!y->indomain(val)) lits.push(*y != val);
+      }
+
+      r = Reason_new(lits);
+    }
+
+//    cout << "\trem combs" << endl;
+    // Remove combinations
+    for (int i = 0; i < N; ++i) {
+      bool did = false;
+      for (int64_t ii = 0; ii + x[i]->getMin() <= x[i]->getMax(); ++ii) {
+        if (support[i][ii]) continue;
+        if (x[i]->remValNotR(val[i][ii])) {
+          // --> TEST PRINT
+          if (!did) {
+            did = true;
+            cout << "%%% Propagates: Domains: ";
+            for (int ii = 0; ii < N; ++ii) {
+              int64_t dom_len, dom_size = 0;
+              dom_len = x[ii]->getMax() - x[ii]->getMin() + 1;
+              for (int64_t v = x[ii]->getMin(); v <= x[ii]->getMax(); ++v) {
+                if (x[ii]->indomain(v)) ++dom_size;
+              }
+              cout << dom_len << " (" << dom_size << "), ";
+            }
+            int64_t dom_len, dom_size = 0;
+            dom_len = y->getMax() - y->getMin() + 1;
+            for (int64_t v = y->getMin(); v <= y->getMax(); ++v) {
+              if (y->indomain(v)) ++dom_size;
+            }
+            cout << dom_len << " (" << dom_size << ")" << endl;
+          }
+          // <-- END TEST PRINT
+          n_prop_x++;
+          if (!x[i]->remVal(val[i][ii], r)) {
+            n_incons_x++;
+            return false;
+          }
+        }
+      }
+    }
+    bool did = false;
+    for (int64_t ii = 0; ii + y->getMin() <= y->getMax(); ++ii) {
+      if (support[N][ii]) continue;
+      if (y->remValNotR(val[N][ii])) {
+        // --> TEST PRINT
+        if (!did) {
+          did = true;
+          cout << "%%% VAR Propagates: Domains: ";
+          for (int ii = 0; ii < N; ++ii) {
+            int64_t dom_len, dom_size = 0;
+            dom_len = x[ii]->getMax() - x[ii]->getMin() + 1;
+            for (int64_t v = x[ii]->getMin(); v <= x[ii]->getMax(); ++v) {
+              if (x[ii]->indomain(v)) ++dom_size;
+            }
+            cout << dom_len << " (" << dom_size << "), ";
+          }
+          int64_t dom_len, dom_size = 0;
+          dom_len = y->getMax() - y->getMin() + 1;
+          for (int64_t v = y->getMin(); v <= y->getMax(); ++v) {
+            if (y->indomain(v)) ++dom_size;
+          }
+          cout << dom_len << " (" << dom_size << ")" << endl;
+        }
+        // <-- END TEST PRINT
+        n_prop_v++;
+        if (!y->remVal(val[N][ii], r)) {
+          n_incons_v++;
+          return false;
+        }
+      }
+    }
+
+//    cout << "\tsuccess, return" << endl;
+    // Success
+    return true;
+  }
+
+  //------------//
+  // Smart Mode // mode = 7
+  //------------//
+
+  bool prop_x_v7() {
+    bool one_fixed_ = y->isFixed();
+    for (int i = 0; i < N && !one_fixed; ++i) {
+      one_fixed_ = x[i]->isFixed();
+    }
+    one_fixed = one_fixed_;
+    for (int i = 0; i < N; i++) {
+      if (pos[i] == 0) {
+        if (!prop_x_v1_O(i)) return false;
+      }
+    }
+    if (one_fixed) {
+      if (!prop_x_v2()) return false;
+    }
+    return true;
+  }
+
+  //--------//
+  // New LB // mode = 8
+  //--------//
+
+  bool prop_var_lb_new() {
+    int64_t L = s->getMin();
+    int64_t R = s->getMax();
+    int64_t V = 0;
+    int64_t M = 0;
+    while (L < R) {
+      int64_t mid_L = L + (R - L)/2;
+      int64_t mid_R = mid_L + 1;
+
+      int64_t V_L, V_R, M_L, M_R, Sq_L, Sq_R = 0;
+      for (int i = 0; i < N; ++i) {
+        int64_t xlb = x[i]->getMin();
+        int64_t xub = x[i]->getMax();
+
+        if      (N*xub <= mid_L) {M_L += xub; Sq_L += N*xub*xub;} // below mid_L
+        else if (mid_L <= N*xlb) {M_L += xlb; Sq_L += N*xlb*xlb;} // above mid_L
+        else {M_L += mid_L; Sq_L += N*mid_L*mid_L;} // overlap mid_L
+
+        if      (N*xub <= mid_R) {M_R += xub; Sq_R += N*xub*xub;} // below mid_R
+        else if (mid_R <= N*xlb) {M_R += xlb; Sq_R += N*xlb*xlb;} // above mid_R
+        else {M_R += mid_R; Sq_R += N*mid_R*mid_R;} // overlap mid_L
+      }
+
+      V_L = Sq_L - M_L*M_L;
+      V_R = Sq_R - M_R*M_R;
+
+      if (V_L == 0 || V_R == 0) {return true;} // worst lb found
+      if (V_L == V_R) {V = V_L; M = mid_L; break;} // found lb
+      if      (V_L  < V_R) {V = V_L; M = mid_L; R = mid_L;} // search left
+      else if (V_L  > V_R) {V = V_R; M = mid_R; L = mid_R;} // search right
+    }
+
+    // update positions
+    for (int i = 0; i < N; ++i) { // O(N)
+      if      (M < N*x[i]->getMin()) pos[i] =  1;
+      else if (N*x[i]->getMax() < M) pos[i] = -1;
+      else                           pos[i] =  0;
+    }
+
+    // get scaled variance
+    const int reset = std::fegetround();
+    std::fesetround(FE_DOWNWARD);
+    int64_t scaled_var = (int64_t) ((long double) V * scale) / (N*N);
+    std::fesetround(reset);
+
+    if (y->setMinNotR(scaled_var)) {
+      n_prop_v_lb++;
+      Clause* r = nullptr;
+      if(so.lazy) {
+        Lit lit[2*N+2];
+        int lits = 0;
+        for(int ii = 0; ii < N; ++ii) {
+          if      (pos[ii] ==  1) lit[lits++] = x[ii]->getMinLit();
+          else if (pos[ii] == -1) lit[lits++] = x[ii]->getMaxLit();
+        }
+        if (M == s->getMin()) lit[lits++] = s->getMinLit();
+        if (M == s->getMax()) lit[lits++] = s->getMaxLit();
+        r = Reason_new(lits+1);
+        for(int ii = 0; ii < lits; ++ii) (*r)[ii+1] = lit[ii];
+      }
+      if(!y->setMin(scaled_var, r)) {
+        n_incons_v_lb++;
+        return false;
+      }
+    }
+    return true;
+  }
+
+  //-----------//
+  // OLD STUFF //
+  //-----------//
 
   bool prop_x() {
 
