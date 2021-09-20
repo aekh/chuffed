@@ -834,7 +834,13 @@ namespace FlatZinc {
       int mode = ce[4]->getInt();
       variance_int(getIntVar(ce[0]), iv, getIntVar(ce[2]), scale, mode);
     }
-    void p_covsq(const ConExpr& ce, AST::Node* ann) {
+		void p_gini_int(const ConExpr& ce, AST::Node* ann) {
+			vec<IntVar*> iv; arg2intvarargs(iv, ce[1]);
+			int scale = ce[3]->getInt();
+			int mode = ce[4]->getInt();
+			gini_int(getIntVar(ce[0]), iv, getIntVar(ce[2]), scale, mode);
+		}
+		void p_covsq(const ConExpr& ce, AST::Node* ann) {
       vec<IntVar*> iv; arg2intvarargs(iv, ce[1]);
 			int scale = ce[2]->getInt();
 			covsq(getIntVar(ce[0]), iv, scale);
@@ -1196,6 +1202,7 @@ namespace FlatZinc {
 				registry().add("bool_lin_gt_reif", &p_bool_lin_gt_reif);
 */
         registry().add("variance_int", &p_variance_int);
+        registry().add("gini_int", &p_gini_int);
         registry().add("cov_sq", &p_covsq);
 
         registry().add("spread_fast", &p_spread_fast);
