@@ -1200,7 +1200,7 @@ public:
       n_prop_v_lb++;
       Clause* r = nullptr;
       if(so.lazy) {
-        Lit lit[2*N+4];
+        Lit lit[N+2];
         int lits = 0;
         for(int ii = 0; ii < N; ++ii) {
           if      (pos[ii] ==  1) lit[lits++] = x[ii]->getMinLit();
