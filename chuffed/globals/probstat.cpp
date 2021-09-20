@@ -117,6 +117,8 @@ public:
         return prop_x_dc();
       case 7:
         return prop_var_lb()  &&  prop_x_v7();
+      case 8: // As in paper
+        return prop_var_lb_new();
       default: // checking x, filter v
         return checking_prop();
     }
@@ -187,10 +189,11 @@ public:
     long double result_f = (long double) sqdiff / (long double) (N*N*N);
     int64_t result = (int64_t) (result_f * scale);
 
+//    printf("%% Fixed X Prop %%\n");
 //    for (int i = 0; i < N; ++i) printf("   %% x[%d] = %d..%d      ", i, x[i]->getMin(), x[i]->getMax());
 //    printf("%% y = %d..%d      ", y->getMin(), y->getMax());
 //    printf("%% s = %d..%d\n", s->getMin(), s->getMax());
-//    printf("%% sqdiff = %lld and result_f = %Lf and result_f scaled = %Lf and result = %lld", sqdiff, result_f, result_f * scale, result);
+//    printf("   %% sqdiff = %lld and result_f = %Lf and result_f scaled = %Lf and result = %lld", sqdiff, result_f, result_f * scale, result);
 //    printf("   %% want to set y to %lli when it is %d..%d\n", result, y->getMin(), y->getMax());
 
     // set y
@@ -1154,27 +1157,30 @@ public:
       int64_t mid_L = L + (R - L)/2;
       int64_t mid_R = mid_L + 1;
 
-      int64_t V_L, V_R, M_L, M_R, Sq_L, Sq_R = 0;
+      int64_t V_L = 0, V_R = 0, M_L = 0, M_R = 0, Sq_L = 0, Sq_R = 0;
       for (int i = 0; i < N; ++i) {
-        int64_t xlb = x[i]->getMin();
-        int64_t xub = x[i]->getMax();
+        int64_t xlb = N*x[i]->getMin();
+        int64_t xub = N*x[i]->getMax();
 
-        if      (N*xub <= mid_L) {M_L += xub; Sq_L += N*xub*xub;} // below mid_L
-        else if (mid_L <= N*xlb) {M_L += xlb; Sq_L += N*xlb*xlb;} // above mid_L
-        else {M_L += mid_L; Sq_L += N*mid_L*mid_L;} // overlap mid_L
+        if      (xub <= mid_L) {M_L += xub; Sq_L += xub*xub;} // below mid_L
+        else if (mid_L <= xlb) {M_L += xlb; Sq_L += xlb*xlb;} // above mid_L
+        else {M_L += mid_L; Sq_L += mid_L*mid_L;} // overlap mid_L
 
-        if      (N*xub <= mid_R) {M_R += xub; Sq_R += N*xub*xub;} // below mid_R
-        else if (mid_R <= N*xlb) {M_R += xlb; Sq_R += N*xlb*xlb;} // above mid_R
-        else {M_R += mid_R; Sq_R += N*mid_R*mid_R;} // overlap mid_L
+        if      (xub <= mid_R) {M_R += xub; Sq_R += xub*xub;} // below mid_R
+        else if (mid_R <= xlb) {M_R += xlb; Sq_R += xlb*xlb;} // above mid_R
+        else {M_R += mid_R; Sq_R += mid_R*mid_R;} // overlap mid_R
       }
 
-      V_L = Sq_L - M_L*M_L;
-      V_R = Sq_R - M_R*M_R;
+      V_L = N*Sq_L - M_L*M_L;
+      V_R = N*Sq_R - M_R*M_R;
+
+//      printf("%% PRE LB Prop %%, (V_L at mid_L, V_R at mid_R) = (%lli at %lli, %lli at %lli)\n", V_L, mid_L, V_R, mid_R);
+//      printf("  %% Sq_L=%lli, Sq_R=%lli, M_L=%lli, M_R=%lli\n", Sq_L, Sq_R, M_L, M_R);
 
       if (V_L == 0 || V_R == 0) {return true;} // worst lb found
       if (V_L == V_R) {V = V_L; M = mid_L; break;} // found lb
-      if      (V_L  < V_R) {V = V_L; M = mid_L; R = mid_L;} // search left
-      else if (V_L  > V_R) {V = V_R; M = mid_R; L = mid_R;} // search right
+      if      (V_L < V_R) {V = V_L; M = mid_L; R = mid_L;} // search left
+      else if (V_L > V_R) {V = V_R; M = mid_R; L = mid_R;} // search right
     }
 
     // update positions
@@ -1187,24 +1193,37 @@ public:
     // get scaled variance
     const int reset = std::fegetround();
     std::fesetround(FE_DOWNWARD);
-    int64_t scaled_var = (int64_t) ((long double) V * scale) / (N*N);
+    auto scaled_var = (int64_t) (((long double) (V * scale)) / (N*N*N*N));
     std::fesetround(reset);
 
     if (y->setMinNotR(scaled_var)) {
       n_prop_v_lb++;
       Clause* r = nullptr;
       if(so.lazy) {
-        Lit lit[2*N+2];
+        Lit lit[2*N+4];
         int lits = 0;
         for(int ii = 0; ii < N; ++ii) {
           if      (pos[ii] ==  1) lit[lits++] = x[ii]->getMinLit();
           else if (pos[ii] == -1) lit[lits++] = x[ii]->getMaxLit();
+          //else if (pos[ii] ==  0) {
+          //  lit[lits++] = x[ii]->getMinLit();
+          //  lit[lits++] = x[ii]->getMaxLit();
+          //}
         }
         if (M == s->getMin()) lit[lits++] = s->getMinLit();
         if (M == s->getMax()) lit[lits++] = s->getMaxLit();
+
+        // lit[lits++] = y->getMinLit();
+        // lit[lits++] = y->getMaxLit();
         r = Reason_new(lits+1);
         for(int ii = 0; ii < lits; ++ii) (*r)[ii+1] = lit[ii];
       }
+//      if (scaled_var >= INT64_MAX)
+//      printf("%% LB Prop %%\n");
+//      for (int i = 0; i < N; ++i) printf("   %% x[%d] = %d..%d      ", i, x[i]->getMin(), x[i]->getMax());
+//      printf("%% y = %d..%d      ", y->getMin(), y->getMax());
+//      printf("%% s = %d..%d\n", s->getMin(), s->getMax());
+//      printf("   %% want to set y to %lli when it is %d..%d\n", scaled_var, y->getMin(), y->getMax());
       if(!y->setMin(scaled_var, r)) {
         n_incons_v_lb++;
         return false;
@@ -1424,7 +1443,7 @@ public:
           // prune
           if (x[i]->setMaxNotR(n_xub)) {
             std::fesetround(reset);
-            printf("COUNTZ %lli\n", ++counter_prop);
+//            printf("COUNTZ %lli\n", ++counter_prop);
 //            printf("===\n");
 //            for (int i = 0; i < N; ++i) printf("   %% x[%d] = %d..%d      ", i, x[i]->getMin(), x[i]->getMax());
 //            printf("%% y = %d..%d      ", y->getMin(), y->getMax());
@@ -1465,7 +1484,7 @@ public:
 
           // prune
           if (x[i]->setMinNotR(n_xlb)) {
-            printf("COUNTZ %lli\n", ++counter_prop);
+//            printf("COUNTZ %lli\n", ++counter_prop);
             std::fesetround(reset);
             if (!x[i]->setMin(n_xlb, r)) return false;
           }
@@ -1550,6 +1569,145 @@ public:
   }
 };
 
+class CVInt : public Propagator {
+public:
+  int const N;
+  IntVar *y;
+  vec<IntVar*> x;
+  IntVar *s;
+  int scale;
+  int mode;
+
+  Tint subsumed;
+
+  CVInt(IntVar *_y, vec<IntVar*> &_x, IntVar *_s, int _scale, int _mode) :
+  N(_x.size()), y(_y), x(_x), scale(_scale), mode(_mode) {
+    priority = 2;
+    subsumed = 0;
+    switch (mode) {
+      case 0: // filter y when x fixed
+        for (int i = 0; i < N; ++i) x[i]->attach(this, i, EVENT_F);
+        y->attach(this, N, EVENT_F);
+        break;
+      case 1: // lb y
+      default:
+        for (int i = 0; i < N; i++) x[i]->attach(this, i, EVENT_LU);
+        y->attach(this, N, EVENT_F);
+        s->attach(this, N+1, EVENT_LU);
+    }
+  }
+};
+
+class GiniInt: public Propagator {
+public:
+  int const N;
+  IntVar *y;
+  vec<IntVar*> x;
+  IntVar *s;
+  int scale;
+  int mode;
+
+  Tint subsumed;
+
+  GiniInt(IntVar *_y, vec<IntVar*> &_x, IntVar *_s, int _scale, int _mode) :
+  N(_x.size()), y(_y), x(_x), scale(_scale), mode(_mode) {
+    priority = 2;
+    subsumed = 0;
+    //cout << "test" << endl;
+    //s->remVal(0, lit_True); // division by 0
+    //cout << "test again" << endl;
+    switch (mode) {
+      case 0: // filter y when x fixed
+        for (int i = 0; i < N; ++i) x[i]->attach(this, i, EVENT_F);
+        y->attach(this, N, EVENT_F);
+        break;
+      case 1: // lb y
+      default:
+        for (int i = 0; i < N; i++) x[i]->attach(this, i, EVENT_LU);
+        y->attach(this, N, EVENT_F);
+        s->attach(this, N+1, EVENT_LU);
+    }
+  }
+
+  void wakeup(int i, int c) override {
+//    cout << "wakeup" << endl;
+    if (subsumed) return;
+    pushInQueue();
+  }
+
+  bool propagate() override {
+    if(!s->remVal(0, lit_True)) return false; // division by 0
+    bool all_fixed = true;
+    for (int i = 0; i < N; ++i) {
+      if (!x[i]->isFixed()) {
+        all_fixed = false;
+        break;
+      }
+    }
+
+    if (all_fixed) {
+      return prop_fix();
+    } else if (mode != 0) {
+      return false;//prop_lb();
+    }
+    return true;
+  }
+
+  bool prop_fix() {
+//    cout << "prop fix" << endl;
+    int64_t diff = 0;
+    for (int i = 0; i < N; ++i) {
+      for (int j = 0; j < N; ++j) {
+        diff += labs(x[i]->getVal() - x[i]->getVal());
+      }
+    } diff *= scale;
+
+    int64_t sum = 0;
+    if (s->isFixed()) sum = s->getVal();
+    else {
+      for (int i = 0; i < N; ++i) sum += x[i]->getVal();
+    }
+
+    Clause* r = nullptr;
+    if(so.lazy) {
+      // Set up reason
+      r = Reason_new(N+1);
+      for(int ii = 0; ii < N; ++ii) (*r)[ii+1] = x[ii]->getValLit();
+    }
+
+//    cout << "set sum" << endl;
+    if(s->setValNotR(sum)) {
+//      cout << "setting sum" << endl;
+//      if(!s->setVal(sum, r)) {
+//        cout << "failed sum" << endl;
+//        return false;
+//      }
+//      cout << "did not fail" << endl;
+    }
+
+//    cout << "assert test" << endl;
+    assert(sum != 0 && "SUM IS ZERO!");
+
+//    cout << "save rounding" << endl;
+    const int reset = std::fegetround();
+//    cout << "set new rounding" << endl;
+    std::fesetround(FE_DOWNWARD);
+//    cout << "get gini_f" << endl;
+    auto gini_f = (long double) diff / (long double) (N * sum);
+//    cout << "get real gini" << endl;
+    int64_t gini = (int64_t) gini_f;
+//    cout << "reset rounding" << endl;
+    std::fesetround(reset);
+
+//    cout << "set y" << endl;
+    // set y
+    if(y->setValNotR(gini)) {
+      if(!y->setVal(gini, r)) return false;
+    }
+    subsumed = 1;
+    return true;
+  }
+};
 
 class CovSq : public Propagator {
 public:
@@ -1575,7 +1733,7 @@ public:
         return true;
       }
     }
-    printf("%% actual prop starting..\n");
+//    printf("%% actual prop starting..\n");
     long double result_f;
 		int64_t result = 0;
 		int64_t dividend = 0;
@@ -1589,10 +1747,10 @@ public:
     }
     result_f = (dividend * scale) / divisor;
     result = (int64_t) result_f;
-    printf("%% %lli / %lli = %Lf, then = %lld", dividend, divisor, result_f, result);
-    printf("%% %lld \n", result);
+//    printf("%% %lli / %lli = %Lf, then = %lld", dividend, divisor, result_f, result);
+//    printf("%% %lld \n", result);
     if(y->setValNotR(result)) {
-      printf("%% setValNotR\n");
+//      printf("%% setValNotR\n");
       Clause* r = nullptr;
       if(so.lazy) {
         // Set up reason
@@ -1623,7 +1781,9 @@ void variance_int(IntVar* y, vec<IntVar*>& x, IntVar* s, int scale, int mode) {
   if (x.size() >= 1) new VarianceInt(y, x, s, scale, mode);
 }
 
-
+void gini_int(IntVar* y, vec<IntVar*>& x, IntVar* s, int scale, int mode) {
+  if (x.size() >= 1) new GiniInt(y, x, s, scale, mode);
+}
 class SpreadFast : public Propagator {
 public:
   int const N;
@@ -1710,13 +1870,13 @@ public:
       }
     }
     bounds->growTo(act_len);
-    printf("%% DAD, act_len = %d\n", act_len);
+//    printf("%% DAD, act_len = %d\n", act_len);
     for (auto i = 0; i < act_len; ++i) {
       (*bounds)[0].growTo(3);
       *bounds[i][0] = arr[i][0];
       *bounds[i][1] = arr[i][1];
-      printf("%% ss\n");
-      printf("%% %d = %d..%d\n", i, *bounds[i][0], *bounds[i][1]);
+//      printf("%% ss\n");
+//      printf("%% %d = %d..%d\n", i, *bounds[i][0], *bounds[i][1]);
     }
   }
 
