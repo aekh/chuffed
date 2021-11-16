@@ -71,6 +71,7 @@ public:
       case 5: // only lb var
       case 7: // smart
       case 8: // only new lb var
+      case 9: // real version
         init_v1v2();
         break;
       case 6:
@@ -117,8 +118,10 @@ public:
         return prop_x_dc();
       case 7:
         return prop_var_lb()  &&  prop_x_v7();
-      case 8: // As in paper
+      case 8: //
         return prop_var_lb_new();
+      case 9: // Real version (as in paper)
+        return prop_var_lb_real();
       default: // checking x, filter v
         return checking_prop();
     }
@@ -1194,6 +1197,91 @@ public:
     const int reset = std::fegetround();
     std::fesetround(FE_DOWNWARD);
     auto scaled_var = (int64_t) (((long double) (V * scale)) / (N*N*N*N));
+    std::fesetround(reset);
+
+    if (y->setMinNotR(scaled_var)) {
+      n_prop_v_lb++;
+      Clause* r = nullptr;
+      if(so.lazy) {
+        Lit lit[N+2];
+        int lits = 0;
+        for(int ii = 0; ii < N; ++ii) {
+          if      (pos[ii] ==  1) lit[lits++] = x[ii]->getMinLit();
+          else if (pos[ii] == -1) lit[lits++] = x[ii]->getMaxLit();
+          //else if (pos[ii] ==  0) {
+          //  lit[lits++] = x[ii]->getMinLit();
+          //  lit[lits++] = x[ii]->getMaxLit();
+          //}
+        }
+        if (M == s->getMin()) lit[lits++] = s->getMinLit();
+        if (M == s->getMax()) lit[lits++] = s->getMaxLit();
+
+        // lit[lits++] = y->getMinLit();
+        // lit[lits++] = y->getMaxLit();
+        r = Reason_new(lits+1);
+        for(int ii = 0; ii < lits; ++ii) (*r)[ii+1] = lit[ii];
+      }
+//      if (scaled_var >= INT64_MAX)
+//      printf("%% LB Prop %%\n");
+//      for (int i = 0; i < N; ++i) printf("   %% x[%d] = %d..%d      ", i, x[i]->getMin(), x[i]->getMax());
+//      printf("%% y = %d..%d      ", y->getMin(), y->getMax());
+//      printf("%% s = %d..%d\n", s->getMin(), s->getMax());
+//      printf("   %% want to set y to %lli when it is %d..%d\n", scaled_var, y->getMin(), y->getMax());
+      if(!y->setMin(scaled_var, r)) {
+        n_incons_v_lb++;
+        return false;
+      }
+    }
+    return true;
+  }
+
+  //---------//
+  // Best LB // mode = 9
+  //---------//
+
+  bool prop_var_lb_real() {
+    int64_t L = s->getMin();
+    int64_t R = s->getMax();
+    int64_t V = 0;
+    int64_t M = 0;
+    while (L < R) {
+      int64_t mid_L = L + (R - L)/2;
+      int64_t mid_R = mid_L + 1;
+
+      int64_t V_L = 0, V_R = 0;
+      for (int i = 0; i < N; ++i) {
+        int64_t xlb = N*x[i]->getMin();
+        int64_t xub = N*x[i]->getMax();
+
+        if      (xub <= mid_L) {V_L += (N*xub - mid_L);} // below mid_L
+        else if (mid_L <= xlb) {V_L += (N*xlb - mid_L);} // above mid_L
+        else {} // overlap mid_L
+
+        if      (xub <= mid_R) {V_R += (N*xub - mid_L);} // below mid_R
+        else if (mid_R <= xlb) {V_R += (N*xlb - mid_L);} // above mid_R
+        else {} // overlap mid_R
+      }
+
+//      printf("%% PRE LB Prop %%, (V_L at mid_L, V_R at mid_R) = (%lli at %lli, %lli at %lli)\n", V_L, mid_L, V_R, mid_R);
+//      printf("  %% Sq_L=%lli, Sq_R=%lli, M_L=%lli, M_R=%lli\n", Sq_L, Sq_R, M_L, M_R);
+
+      if (V_L == 0 || V_R == 0) {return true;} // worst lb found
+      if (V_L == V_R) {V = V_L; M = mid_L; break;} // found lb
+      if      (V_L < V_R) {V = V_L; M = mid_L; R = mid_L;} // search left
+      else if (V_L > V_R) {V = V_R; M = mid_R; L = mid_R;} // search right
+    }
+
+    // update positions
+    for (int i = 0; i < N; ++i) { // O(N)
+      if      (M < N*x[i]->getMin()) pos[i] =  1;
+      else if (N*x[i]->getMax() < M) pos[i] = -1;
+      else                           pos[i] =  0;
+    }
+
+    // get scaled variance
+    const int reset = std::fegetround();
+    std::fesetround(FE_DOWNWARD);
+    auto scaled_var = (int64_t) (((long double) (V * scale)) / (N*N*N));
     std::fesetround(reset);
 
     if (y->setMinNotR(scaled_var)) {
