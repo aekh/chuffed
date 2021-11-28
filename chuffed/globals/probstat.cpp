@@ -27,8 +27,11 @@ public:
   Tint64_t MxR; // highest sum of lb n^3 variance
   Tint64_t Vx; // lb n^3 variance
   Tint all_fixed; // true if all x are fixed
+  Tint n_fixed;
   Tint one_fixed;
   Tint subsumed;
+  Tint64_t glb; // warning: not kept up to date if lub <= glb
+  Tint64_t lub; // dito
 
   // Statistics
   uint64_t n_wakeups;
@@ -85,17 +88,45 @@ public:
   void wakeup(int i, int c) override {
     if (subsumed) return;
     n_wakeups++;
-    if (all_fixed == 0 && i < N
-                       && (c & EVENT_F || c & EVENT_LF || c & EVENT_UF)) {
-      int all_fixed_ = 1;
-      for (int i = 0; i < N; i++) { // O(N)
-        if (!x[i]->isFixed()) {
-          all_fixed_ = 0;
-          break;
-        }
-      }
-      all_fixed = all_fixed_;
+
+    if (mode == 9 && glb <= lub) { // Trivial case: var >= 0;
+      if (i < N && c & EVENT_U && x[i]->getMax() < lub)
+        lub = x[i]->getMax();
+      if (i < N && c & EVENT_L && x[i]->getMin() > glb)
+        glb = x[i]->getMin();
+      if (glb > lub)
+        pushInQueue(); // something of use can be done
+      return;
     }
+
+    if (!all_fixed && i < N && c & EVENT_F) {
+      n_fixed++;
+      if (n_fixed == N)
+        all_fixed = 1;
+      //int all_fixed_ = 1;
+      //for (int i = 0; i < N; i++) { // O(N)
+      //  if (!x[i]->isFixed()) {
+      //    all_fixed_ = 0;
+      //    break;
+      //  }
+      //}
+      //all_fixed = all_fixed_;
+    }
+
+    if (!all_fixed && mode == 9 && i < N) {
+      int64_t xlb = N*x[i]->getMin();
+      int64_t xub = N*x[i]->getMax();
+      if (c & EVENT_U) {
+        if (Mx <= xlb) return;
+        else if (Mx <= xub) return;
+        else pushInQueue();
+      } else if (c & EVENT_L) {
+        if (xub <= Mx) return;
+        else if (xlb <= Mx) return;
+        else pushInQueue();
+      }
+    }
+
     pushInQueue();
   }
 
@@ -163,6 +194,11 @@ public:
   void init_checking() {
     for (int i = 0; i < N; i++) x[i]->attach(this, i, EVENT_F);
     y->attach(this, N, EVENT_F);
+    int n_fixed_ = 0;
+    for (int i = 0; i < N; ++i) {
+      if (x[i]->isFixed()) n_fixed_++;
+    }
+    n_fixed = n_fixed_;
   }
 
   bool checking_prop() {
@@ -229,6 +265,23 @@ public:
     }
     y->attach(this, N, EVENT_F);
     s->attach(this, N+1, EVENT_LU);
+
+    if (mode == 9) {
+      int64_t lub_ = INT64_MIN;
+      int64_t glb_ = INT64_MAX;
+      for (int i = 0; i < N; ++i) {
+        if (x[i]->getMin() > glb_) glb_ = x[i]->getMin();
+        if (x[i]->getMax() < lub_) lub_ = x[i]->getMax();
+      }
+      lub = lub_;
+      glb = glb_;
+    }
+
+    int n_fixed_ = 0;
+    for (int i = 0; i < N; ++i) {
+      if (x[i]->isFixed()) n_fixed_++;
+    }
+    n_fixed = n_fixed_;
   }
 
   bool prop_var_lb() {
@@ -972,6 +1025,12 @@ public:
     }
     y->attach(this, N, EVENT_C);
     s->attach(this, N+1, EVENT_LU);
+
+    int n_fixed_ = 0;
+    for (int i = 0; i < N; ++i) {
+      if (x[i]->isFixed()) n_fixed_++;
+    }
+    n_fixed = n_fixed_;
   }
 
   bool prop_x_dc(){
