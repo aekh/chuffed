@@ -267,8 +267,8 @@ public:
     s->attach(this, N+1, EVENT_LU);
 
     if (mode == 9) {
-      int64_t lub_ = INT64_MIN;
-      int64_t glb_ = INT64_MAX;
+      int64_t lub_ = INT64_MAX;
+      int64_t glb_ = INT64_MIN;
       for (int i = 0; i < N; ++i) {
         if (x[i]->getMin() > glb_) glb_ = x[i]->getMin();
         if (x[i]->getMax() < lub_) lub_ = x[i]->getMax();
@@ -1755,61 +1755,114 @@ public:
   int mode;
 
   Tint subsumed;
+  Tint n_fixed;
+  Tint all_fixed;
+  Tint64_t glb;
+  Tint64_t lub;
 
   GiniInt(IntVar *_y, vec<IntVar*> &_x, IntVar *_s, int _scale, int _mode) :
-  N(_x.size()), y(_y), x(_x), scale(_scale), mode(_mode) {
+  N(_x.size()), y(_y), x(_x), s(_s), scale(_scale), mode(_mode) {
+    for (int i = 0; i < N; ++i) {
+      assert(x[i]->getMin() > 0);
+    } assert(s->getMin() > 0);
+
     priority = 2;
     subsumed = 0;
-    //cout << "test" << endl;
-    //s->remVal(0, lit_True); // division by 0
-    //cout << "test again" << endl;
+    all_fixed = 0;
+
     switch (mode) {
       case 0: // filter y when x fixed
         for (int i = 0; i < N; ++i) x[i]->attach(this, i, EVENT_F);
         y->attach(this, N, EVENT_F);
         break;
-      case 1: // lb y
       default:
         for (int i = 0; i < N; i++) x[i]->attach(this, i, EVENT_LU);
         y->attach(this, N, EVENT_F);
         s->attach(this, N+1, EVENT_LU);
+        if (mode == 9) {
+          int64_t lub_ = INT64_MAX;
+          int64_t glb_ = INT64_MIN;
+          for (int i = 0; i < N; ++i) {
+            if (x[i]->getMin() > glb_) glb_ = x[i]->getMin();
+            if (x[i]->getMax() < lub_) lub_ = x[i]->getMax();
+          }
+          lub = lub_;
+          glb = glb_;
+        }
+    }
+
+    int n_fixed_ = 0;
+    for (int i = 0; i < N; ++i) {
+      if (x[i]->isFixed()) n_fixed_++;
+    }
+    n_fixed = n_fixed_;
+    if (n_fixed == N) {
+      all_fixed = 1;
+      pushInQueue();
     }
   }
 
   void wakeup(int i, int c) override {
-//    cout << "wakeup" << endl;
     if (subsumed) return;
+    //n_wakeups++;
+
+    if (mode == 9 && glb <= lub) { // Trivial case: Gini >= 0;
+      if (i < N && c & EVENT_U && x[i]->getMax() < lub)
+        lub = x[i]->getMax();
+      if (i < N && c & EVENT_L && x[i]->getMin() > glb)
+        glb = x[i]->getMin();
+      if (glb > lub)
+        pushInQueue(); // something of use can be done
+      return;
+    }
+
+    if (!all_fixed && i < N && c & EVENT_F) {
+      n_fixed++;
+      if (n_fixed == N) {
+        all_fixed = 1;
+        for (int i = 0; i < N; ++i) {
+          assert(x[i]->isFixed() && "IS FIXED CALC WRONG");
+        }
+      }
+    }
+
+//    if (!all_fixed && mode == 9 && i < N) {
+//      int64_t xlb = N*x[i]->getMin();
+//      int64_t xub = N*x[i]->getMax();
+//      if (c & EVENT_U) {
+//        if (Mx <= xlb) return;
+//        else if (Mx <= xub) return;
+//        else pushInQueue();
+//      } else if (c & EVENT_L) {
+//        if (xub <= Mx) return;
+//        else if (xlb <= Mx) return;
+//        else pushInQueue();
+//      }
+//    }
+
     pushInQueue();
   }
 
   bool propagate() override {
-    if(!s->remVal(0, lit_True)) return false; // division by 0
-    bool all_fixed = true;
-    for (int i = 0; i < N; ++i) {
-      if (!x[i]->isFixed()) {
-        all_fixed = false;
-        break;
-      }
-    }
+    if (all_fixed) return prop_fix();
+    else if (mode == 0) return true;
+    else return prop_lb();
+  }
 
-    if (all_fixed) {
-      return prop_fix();
-    } else if (mode != 0) {
-      return false;//prop_lb();
-    }
+  bool prop_lb() {
     return true;
   }
 
   bool prop_fix() {
-//    cout << "prop fix" << endl;
     int64_t diff = 0;
     for (int i = 0; i < N; ++i) {
-      for (int j = 0; j < N; ++j) {
-        diff += labs(x[i]->getVal() - x[i]->getVal());
+      for (int j = i+1; j < N; ++j) {
+        diff += labs(x[i]->getVal() - x[j]->getVal());
       }
     } diff *= scale;
 
     int64_t sum = 0;
+    // TODO: over-defensive
     if (s->isFixed()) sum = s->getVal();
     else {
       for (int i = 0; i < N; ++i) sum += x[i]->getVal();
@@ -1822,31 +1875,12 @@ public:
       for(int ii = 0; ii < N; ++ii) (*r)[ii+1] = x[ii]->getValLit();
     }
 
-//    cout << "set sum" << endl;
-    if(s->setValNotR(sum)) {
-//      cout << "setting sum" << endl;
-//      if(!s->setVal(sum, r)) {
-//        cout << "failed sum" << endl;
-//        return false;
-//      }
-//      cout << "did not fail" << endl;
-    }
-
-//    cout << "assert test" << endl;
-    assert(sum != 0 && "SUM IS ZERO!");
-
-//    cout << "save rounding" << endl;
     const int reset = std::fegetround();
-//    cout << "set new rounding" << endl;
     std::fesetround(FE_DOWNWARD);
-//    cout << "get gini_f" << endl;
     auto gini_f = (long double) diff / (long double) (N * sum);
-//    cout << "get real gini" << endl;
     int64_t gini = (int64_t) gini_f;
-//    cout << "reset rounding" << endl;
     std::fesetround(reset);
 
-//    cout << "set y" << endl;
     // set y
     if(y->setValNotR(gini)) {
       if(!y->setVal(gini, r)) return false;
