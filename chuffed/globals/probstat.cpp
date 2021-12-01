@@ -113,7 +113,7 @@ public:
       //all_fixed = all_fixed_;
     }
 
-    if (!all_fixed && mode == 9 && i < N) {
+    if (!all_fixed && mode == 9 && i < N) { // FIXME fix if run again
       int64_t xlb = N*x[i]->getMin();
       int64_t xub = N*x[i]->getMax();
       if (c & EVENT_U) {
@@ -1754,11 +1754,16 @@ public:
   int scale;
   int mode;
 
+  vec<Tint> pos;
+
   Tint subsumed;
   Tint n_fixed;
   Tint all_fixed;
   Tint64_t glb;
   Tint64_t lub;
+  vec<Tint> sortedbounds;
+  Tint Mx;
+  Tint hasM;
 
   GiniInt(IntVar *_y, vec<IntVar*> &_x, IntVar *_s, int _scale, int _mode) :
   N(_x.size()), y(_y), x(_x), s(_s), scale(_scale), mode(_mode) {
@@ -1769,6 +1774,7 @@ public:
     priority = 2;
     subsumed = 0;
     all_fixed = 0;
+    hasM = 0;
 
     switch (mode) {
       case 0: // filter y when x fixed
@@ -1776,9 +1782,12 @@ public:
         y->attach(this, N, EVENT_F);
         break;
       default:
+        // events
         for (int i = 0; i < N; i++) x[i]->attach(this, i, EVENT_LU);
         y->attach(this, N, EVENT_F);
         s->attach(this, N+1, EVENT_LU);
+
+        // trivial case
         if (mode == 9) {
           int64_t lub_ = INT64_MAX;
           int64_t glb_ = INT64_MIN;
@@ -1789,6 +1798,19 @@ public:
           lub = lub_;
           glb = glb_;
         }
+
+        // sorted bound end points
+        int arr[2*N];
+        for (int i = 0; i < 2*N; ++i) arr[i] = i;
+        quickSort(arr, 0, 2*N-1);
+        //for (int i = 1; i < 2*N; ++i) assert(valof(arr[i-1]) <= valof(arr[i]));
+        //printf("%% OK\n");
+        sortedbounds.growTo(2*N);
+        for (int i = 0; i < 2*N; ++i) sortedbounds[i] = arr[i];
+
+        // positions
+        pos.growTo(N);
+        for (int i = 0; i < N; ++i) pos[i] = 2;
     }
 
     int n_fixed_ = 0;
@@ -1802,9 +1824,73 @@ public:
     }
   }
 
+  int64_t valof(int i) {
+    return i < N ? x[i]->getMin() : x[i-N]->getMax();
+  }
+
+  // A utility function to swap two elements
+  void swap(int* a, int* b) {
+    int t = *a;
+    *a = *b;
+    *b = t;
+  }
+
+  /* This function takes last element as pivot, places
+     the pivot element at its correct position in sorted
+     array, and places all smaller (smaller than pivot)
+     to left of pivot and all greater elements to right
+     of pivot */
+  int partition (int arr[], int low, int high) {
+    int64_t pivot = valof(arr[high]);    // pivot
+    int i = (low - 1);  // Index of smaller element
+
+    for (int j = low; j < high; j++) {
+      // If current element is smaller than or
+      // equal to pivot
+      if (valof(arr[j]) <= pivot) {
+        i++;    // increment index of smaller element
+        swap(&arr[i], &arr[j]);
+      }
+    }
+    swap(&arr[i + 1], &arr[high]);
+    return (i + 1);
+  }
+
+  /* The main function that implements QuickSort
+     arr[] --> Array to be sorted,
+     low  --> Starting index,
+     high  --> Ending index */
+  void quickSort(int arr[], int low, int high) {
+    if (low < high) {
+      /* pi is partitioning index, arr[p] is now
+         at right place */
+      int pi = partition(arr, low, high);
+
+      // Separately sort elements before
+      // partition and after partition
+      quickSort(arr, low, pi - 1);
+      quickSort(arr, pi + 1, high);
+    }
+  }
+
   void wakeup(int i, int c) override {
     if (subsumed) return;
     //n_wakeups++;
+
+    if (mode == 9 && i < N) {
+      int key, j;
+      for(int i = 1; i<2*N; i++) {
+        key = sortedbounds[i];//take value
+        j = i;
+        while(j > 0 && valof(sortedbounds[j-1])>valof(key)) {
+          sortedbounds[j] = sortedbounds[j-1];
+          j--;
+        }
+        sortedbounds[j] = key;   //insert in right place
+      }
+
+      //for (int i = 1; i < 2*N; ++i) assert(valof(sortedbounds[i-1].v) <= valof(sortedbounds[i].v));
+    }
 
     if (mode == 9 && glb <= lub) { // Trivial case: Gini >= 0;
       if (i < N && c & EVENT_U && x[i]->getMax() < lub)
@@ -1820,25 +1906,25 @@ public:
       n_fixed++;
       if (n_fixed == N) {
         all_fixed = 1;
-        for (int i = 0; i < N; ++i) {
-          assert(x[i]->isFixed() && "IS FIXED CALC WRONG");
-        }
+//        for (int i = 0; i < N; ++i) {
+//          assert(x[i]->isFixed() && "IS FIXED CALC WRONG"); // FIXME: REMOVE THIS BEFORE BENCHMARKS!!!
+//        }
       }
     }
 
-//    if (!all_fixed && mode == 9 && i < N) {
-//      int64_t xlb = N*x[i]->getMin();
-//      int64_t xub = N*x[i]->getMax();
-//      if (c & EVENT_U) {
-//        if (Mx <= xlb) return;
-//        else if (Mx <= xub) return;
-//        else pushInQueue();
-//      } else if (c & EVENT_L) {
-//        if (xub <= Mx) return;
-//        else if (xlb <= Mx) return;
-//        else pushInQueue();
-//      }
-//    }
+    if (!all_fixed && mode == 9 && i < N && hasM) {
+      int64_t xlb = N*x[i]->getMin();
+      int64_t xub = N*x[i]->getMax();
+      if (c & EVENT_U) {
+        if (Mx <= xlb) return;
+        else if (Mx <= xub) return;
+        else pushInQueue();
+      } else if (c & EVENT_L) {
+        if (xub <= Mx) return;
+        else if (xlb <= Mx) return;
+        else pushInQueue();
+      }
+    }
 
     pushInQueue();
   }
@@ -1850,6 +1936,137 @@ public:
   }
 
   bool prop_lb() {
+    int L = 0;
+    int R = 2*N-1;
+    int M = 0;
+    int64_t G = 0;
+    unsigned int seenL[N];
+    unsigned int seenR[N];
+    for (int i = 0; i < N; ++i) { seenL[i] = 0; seenR[i] = 0; }
+    unsigned int seendicator = 0;
+    int mid_L, mid_R;
+    bool scan = false;
+    while (L < R) {
+      seendicator++;
+      if (!scan) {
+        mid_L = L + (R - L)/2;
+        mid_R = mid_L + 1;
+      } scan = false;
+
+      int64_t dividend_L = 0, dividend_R = 0;
+      int64_t divisor_L = 0, divisor_R = 0;
+
+      for (int i = 0; i < 2*N; ++i) {
+        int idx = sortedbounds[i];
+        int64_t point = valof(idx);
+        if (idx < N) { // lower bound
+          if (point < sortedbounds[mid_L]) seenL[idx] = seendicator; // lb below mid_L
+          else { // lb above/at mid_L
+            dividend_L += (2*idx - N - 1) * point;
+            divisor_L += N * point;
+          }
+          if (point < sortedbounds[mid_R]) seenR[idx] = seendicator; // lb below mid_R
+          else { // lb above/at mid_R
+            dividend_R += (2*idx - N - 1) * point;
+            divisor_R += N * point;
+          }
+        } else { // upper bound
+          if (point < sortedbounds[mid_L]) { // ub below mid_L
+            dividend_L += (2*idx - N - 1) * point;
+            divisor_L += N * point;
+          } else { // ub above/at mid_L
+            if (seenL[idx] == seendicator) {
+              dividend_L += (2*idx - N - 1) * sortedbounds[mid_L];
+              divisor_L += N * sortedbounds[mid_L];
+            }
+          }
+          if (point < sortedbounds[mid_R]) { // ub below mid_R
+            dividend_R += (2*idx - N - 1) * point;
+            divisor_R += N * point;
+          } else { // ub above/at mid_R
+            if (seenL[idx] == seendicator) {
+              dividend_R += (2*idx - N - 1) * sortedbounds[mid_R];
+              divisor_R += N * sortedbounds[mid_R];
+            }
+          }
+        }
+      }
+
+      const int reset = std::fegetround();
+      std::fesetround(FE_DOWNWARD);
+//      auto G_Lraw = ((long double) (dividend_L )) / (long double) divisor_L;
+//      auto G_Rraw = ((long double) (dividend_R )) / (long double) divisor_R;
+      auto G_L = (int64_t) ((long double) (dividend_L * scale)) / (long double) divisor_L;
+      auto G_R = (int64_t) ((long double) (dividend_R * scale)) / (long double) divisor_R;
+      std::fesetround(reset);
+
+//      printf("%% PRE LB Prop %%, (V_L at mid_L, V_R at mid_R) = (%lli at %lli, %lli at %lli)\n", V_L, mid_L, V_R, mid_R);
+//      printf("  %% Sq_L=%lli, Sq_R=%lli, M_L=%lli, M_R=%lli\n", Sq_L, Sq_R, M_L, M_R);
+
+      if (G_L == 0 || G_R == 0) {return true;} // worst lb found
+      //if (G_L == V_R) {V = V_L; M = mid_L; break;} // found lb
+      if      (G_L < G_R) {G = G_L; M = mid_L; R = mid_L;} // search left
+      else if (G_L > G_R) {G = G_R; M = mid_R; L = mid_R;} // search right
+      else { // G_L == G_R
+        scan = true;
+        if (L < mid_L) mid_L--;
+        else if (mid_R < R) mid_R++;
+        else break;
+        //printf("%% warning: G_L == G_R.\n");
+        //assert(G_Lraw != G_Rraw);
+        //return true;
+      }
+    }
+
+    // update positions
+    int64_t best_nu = valof(sortedbounds[M]);
+    for (int i = 0; i < N; ++i) { // O(N)
+      if      (best_nu < x[i]->getMin()) pos[i] =  1;
+      else if (x[i]->getMax() < best_nu) pos[i] = -1;
+      else                               pos[i] =  0;
+    }
+    hasM = 1;
+    Mx = best_nu;
+
+    // get scaled variance
+    //const int reset = std::fegetround();
+    //std::fesetround(FE_DOWNWARD);
+    //auto scaled_var = (int64_t) (((long double) (V * scale)) / (N*N*N));
+    //std::fesetround(reset);
+
+    if (y->setMinNotR(G)) {
+      //n_prop_v_lb++;
+      Clause* r = nullptr;
+      if(so.lazy) {
+        Lit lit[N+2];
+        int lits = 0;
+        for(int ii = 0; ii < N; ++ii) {
+          if      (pos[ii] ==  1) lit[lits++] = x[ii]->getMinLit();
+          else if (pos[ii] == -1) lit[lits++] = x[ii]->getMaxLit();
+          //else if (pos[ii] ==  0) {
+          //  lit[lits++] = x[ii]->getMinLit();
+          //  lit[lits++] = x[ii]->getMaxLit();
+          //}
+        }
+        if (M == s->getMin()) lit[lits++] = s->getMinLit();
+        if (M == s->getMax()) lit[lits++] = s->getMaxLit();
+
+        // lit[lits++] = y->getMinLit();
+        // lit[lits++] = y->getMaxLit();
+        r = Reason_new(lits+1);
+        for(int ii = 0; ii < lits; ++ii) (*r)[ii+1] = lit[ii];
+      }
+//      if (scaled_var >= INT64_MAX)
+//      printf("%% LB Prop %%\n");
+//      for (int i = 0; i < N; ++i) printf("   %% x[%d] = %d..%d      ", i, x[i]->getMin(), x[i]->getMax());
+//      printf("%% y = %d..%d      ", y->getMin(), y->getMax());
+//      printf("%% s = %d..%d\n", s->getMin(), s->getMax());
+//      printf("   %% want to set y to %lli when it is %d..%d\n", scaled_var, y->getMin(), y->getMax());
+      if(!y->setMin(G, r)) {
+        //n_incons_v_lb++;
+        return false;
+      }
+    }
     return true;
   }
 
