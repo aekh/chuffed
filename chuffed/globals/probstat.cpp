@@ -89,16 +89,6 @@ public:
     if (subsumed) return;
     n_wakeups++;
 
-    if (mode == 9 && glb <= lub) { // Trivial case: var >= 0;
-      if (i < N && c & EVENT_U && x[i]->getMax() < lub)
-        lub = x[i]->getMax();
-      if (i < N && c & EVENT_L && x[i]->getMin() > glb)
-        glb = x[i]->getMin();
-      if (glb > lub)
-        pushInQueue(); // something of use can be done
-      return;
-    }
-
     if (!all_fixed && i < N && c & EVENT_F) {
       n_fixed++;
       if (n_fixed == N)
@@ -111,6 +101,16 @@ public:
       //  }
       //}
       //all_fixed = all_fixed_;
+    }
+
+    if (mode == 9 && glb <= lub) { // Trivial case: var >= 0;
+      if (i < N && c & EVENT_U && x[i]->getMax() < lub)
+        lub = x[i]->getMax();
+      if (i < N && c & EVENT_L && x[i]->getMin() > glb)
+        glb = x[i]->getMin();
+      if (glb > lub)
+        pushInQueue(); // something of use can be done
+      return;
     }
 
     if (!all_fixed && mode == 9 && i < N) { // FIXME fix if run again
@@ -1312,17 +1312,20 @@ public:
         int64_t xlb = N*x[i]->getMin();
         int64_t xub = N*x[i]->getMax();
 
-        if      (xub <= mid_L) {V_L += (N*xub - mid_L);} // below mid_L
-        else if (mid_L <= xlb) {V_L += (N*xlb - mid_L);} // above mid_L
+        if      (xub <= mid_L) {V_L += (xub - mid_L)*(xub - mid_L);} // below mid_L
+        else if (mid_L <= xlb) {V_L += (xlb - mid_L)*(xlb - mid_L);} // above mid_L
         else {} // overlap mid_L
 
-        if      (xub <= mid_R) {V_R += (N*xub - mid_L);} // below mid_R
-        else if (mid_R <= xlb) {V_R += (N*xlb - mid_L);} // above mid_R
+        if      (xub <= mid_R) {V_R += (xub - mid_R)*(xub - mid_R);} // below mid_R
+        else if (mid_R <= xlb) {V_R += (xlb - mid_R)*(xlb - mid_R);} // above mid_R
         else {} // overlap mid_R
       }
 
-//      printf("%% PRE LB Prop %%, (V_L at mid_L, V_R at mid_R) = (%lli at %lli, %lli at %lli)\n", V_L, mid_L, V_R, mid_R);
-//      printf("  %% Sq_L=%lli, Sq_R=%lli, M_L=%lli, M_R=%lli\n", Sq_L, Sq_R, M_L, M_R);
+//      printf("%% PRE LB Prop %%\n");
+//      printf("  %% (L, R) = (%d, %d)\n", L, R);
+//      printf("  %% (V_L at mid_L, V_R at mid_R) = (%lli at %lli, %lli at %lli)\n", V_L, mid_L, V_R, mid_R);
+//      printf("  %% Prev (V, M) = (%d, %d)\n", V, M);
+      //printf("  %% Sq_L=%lli, Sq_R=%lli, M_L=%lli, M_R=%lli\n", Sq_L, Sq_R, M_L, M_R);
 
       if (V_L == 0 || V_R == 0) {return true;} // worst lb found
       if (V_L == V_R) {V = V_L; M = mid_L; break;} // found lb
@@ -1343,22 +1346,39 @@ public:
     auto scaled_var = (int64_t) (((long double) (V * scale)) / (N*N*N));
     std::fesetround(reset);
 
+    //printf("%% outside\n");
     if (y->setMinNotR(scaled_var)) {
+      //printf("%% ..inside\n");
       n_prop_v_lb++;
       Clause* r = nullptr;
       if(so.lazy) {
-        Lit lit[N+2];
+        Lit lit[2*N+2];
         int lits = 0;
+//        printf("constraint (");
         for(int ii = 0; ii < N; ++ii) {
-          if      (pos[ii] ==  1) lit[lits++] = x[ii]->getMinLit();
-          else if (pos[ii] == -1) lit[lits++] = x[ii]->getMaxLit();
+          if      (pos[ii] ==  1) {
+            lit[lits++] = x[ii]->getMinLit();
+//            printf(" util[%d] >= %d /\\ ", ii+1, x[ii]->getMin());
+          }
+          else if (pos[ii] == -1) {
+            lit[lits++] = x[ii]->getMaxLit();
+//            printf(" util[%d] <= %d /\\ ", ii+1, x[ii]->getMax());
+          }
           //else if (pos[ii] ==  0) {
           //  lit[lits++] = x[ii]->getMinLit();
           //  lit[lits++] = x[ii]->getMaxLit();
           //}
         }
-        if (M == s->getMin()) lit[lits++] = s->getMinLit();
-        if (M == s->getMax()) lit[lits++] = s->getMaxLit();
+        if (M == s->getMin()) {
+          lit[lits++] = s->getMinLit();
+//          printf(" UTIL <= %d /\\ ", s->getMax());
+        }
+        if (M == s->getMax()) {
+          lit[lits++] = s->getMaxLit();
+//          printf(" UTIL <= %d /\\ ", s->getMax());
+        }
+
+//        printf(" true) -> ( disp >= %d (actually %lli) ); %% EXPL\n", scaled_var, scaled_var);
 
         // lit[lits++] = y->getMinLit();
         // lit[lits++] = y->getMaxLit();
@@ -1366,11 +1386,13 @@ public:
         for(int ii = 0; ii < lits; ++ii) (*r)[ii+1] = lit[ii];
       }
 //      if (scaled_var >= INT64_MAX)
-//      printf("%% LB Prop %%\n");
-//      for (int i = 0; i < N; ++i) printf("   %% x[%d] = %d..%d      ", i, x[i]->getMin(), x[i]->getMax());
-//      printf("%% y = %d..%d      ", y->getMin(), y->getMax());
-//      printf("%% s = %d..%d\n", s->getMin(), s->getMax());
-//      printf("   %% want to set y to %lli when it is %d..%d\n", scaled_var, y->getMin(), y->getMax());
+//      if (x[1]->getMin() == 3192 && x[2]->getMin() == 3041 && scaled_var == 1428) {
+//        printf("%% LB Prop %%\n");
+//        for (int i = 0; i < N; ++i) printf("   %% x[%d] = %d..%d      ", i, x[i]->getMin(), x[i]->getMax());
+//        printf("%% y = %d..%d      ", y->getMin(), y->getMax());
+//        printf("%% s = %d..%d\n", s->getMin(), s->getMax());
+//        printf("   %% want to set y to %lli when it is %d..%d\n", scaled_var, y->getMin(), y->getMax());
+//      }
       if(!y->setMin(scaled_var, r)) {
         n_incons_v_lb++;
         return false;
@@ -1765,8 +1787,10 @@ public:
   Tint Mx;
   Tint hasM;
 
+  bool setup;
+
   GiniInt(IntVar *_y, vec<IntVar*> &_x, IntVar *_s, int _scale, int _mode) :
-  N(_x.size()), y(_y), x(_x), s(_s), scale(_scale), mode(_mode) {
+  N(_x.size()), y(_y), x(_x), s(_s), scale(_scale), mode(_mode), setup(false) {
     for (int i = 0; i < N; ++i) {
       assert(x[i]->getMin() > 0);
     } assert(s->getMin() > 0);
@@ -1783,9 +1807,11 @@ public:
         break;
       default:
         // events
-        for (int i = 0; i < N; i++) x[i]->attach(this, i, EVENT_LU);
+        for (int i = 0; i < N; i++) {
+          x[i]->attach(this, i, EVENT_LU);
+        }
         y->attach(this, N, EVENT_F);
-        s->attach(this, N+1, EVENT_LU);
+        s->attach(this, N+1, EVENT_F);
 
         // trivial case
         if (mode == 9) {
@@ -1820,8 +1846,9 @@ public:
     n_fixed = n_fixed_;
     if (n_fixed == N) {
       all_fixed = 1;
-      pushInQueue();
     }
+    setup = true;
+    pushInQueue();
   }
 
   int64_t valof(int i) {
@@ -1874,8 +1901,14 @@ public:
   }
 
   void wakeup(int i, int c) override {
+    if (!setup) return;
     if (subsumed) return;
-    //n_wakeups++;
+
+//    if (x[0]->getMin() <= 5757 && 5691 <= x[0]->getMax() &&
+//        x[1]->getMin() <= 5772 && 5754 <= x[1]->getMax() &&
+//        x[2]->getMin() <= 5758 && 5732 <= x[2]->getMax()) {
+//      printf("%% SUPERKEY\n");
+//    }
 
     if (mode == 9 && i < N) {
       int key, j;
@@ -1888,18 +1921,6 @@ public:
         }
         sortedbounds[j] = key;   //insert in right place
       }
-
-      //for (int i = 1; i < 2*N; ++i) assert(valof(sortedbounds[i-1].v) <= valof(sortedbounds[i].v));
-    }
-
-    if (mode == 9 && glb <= lub) { // Trivial case: Gini >= 0;
-      if (i < N && c & EVENT_U && x[i]->getMax() < lub)
-        lub = x[i]->getMax();
-      if (i < N && c & EVENT_L && x[i]->getMin() > glb)
-        glb = x[i]->getMin();
-      if (glb > lub)
-        pushInQueue(); // something of use can be done
-      return;
     }
 
     if (!all_fixed && i < N && c & EVENT_F) {
@@ -1912,9 +1933,21 @@ public:
       }
     }
 
+    if (mode == 9 && glb <= lub) { // Trivial case: Gini >= 0;
+//      printf("%% TRIV CASE\n");
+      if (i < N && c & EVENT_U && x[i]->getMax() < lub)
+        lub = x[i]->getMax();
+      if (i < N && c & EVENT_L && x[i]->getMin() > glb)
+        glb = x[i]->getMin();
+      if (glb > lub)
+        pushInQueue(); // something of use can be done
+      return;
+    }
+
     if (!all_fixed && mode == 9 && i < N && hasM) {
-      int64_t xlb = N*x[i]->getMin();
-      int64_t xub = N*x[i]->getMax();
+//      printf("%% bounds case\n");
+      int64_t xlb = x[i]->getMin();
+      int64_t xub = x[i]->getMax();
       if (c & EVENT_U) {
         if (Mx <= xlb) return;
         else if (Mx <= xub) return;
@@ -1936,6 +1969,8 @@ public:
   }
 
   bool prop_lb() {
+//    printf("%%PROP LB BEGIN-\n");
+
     int L = 0;
     int R = 2*N-1;
     int M = 0;
@@ -1955,50 +1990,64 @@ public:
 
       int64_t dividend_L = 0, dividend_R = 0;
       int64_t divisor_L = 0, divisor_R = 0;
-
-      for (int i = 0; i < 2*N; ++i) {
-        int idx = sortedbounds[i];
+      int iR = 1;
+      int iL = 1;
+      for (int k = 0; k < 2*N; ++k) {
+        int idx = sortedbounds[k];
+        int idxN = idx < N ? idx : idx-N;
         int64_t point = valof(idx);
+        int64_t nuL = valof(sortedbounds[mid_L]);
+        int64_t nuR = valof(sortedbounds[mid_R]);
         if (idx < N) { // lower bound
-          if (point < sortedbounds[mid_L]) seenL[idx] = seendicator; // lb below mid_L
-          else { // lb above/at mid_L
-            dividend_L += (2*idx - N - 1) * point;
+          if (point < nuL) seenL[idxN] = seendicator; // lb below nuL
+          else { // lb above/at nuL
+            dividend_L += (2*(iL++) - N - 1) * point;
             divisor_L += N * point;
+//            printf("    %% xi=%d ABOVE: dividend_L += %lli (= %lli)\n", idxN, (2*(iL-1) - N - 1) * point, dividend_L);
           }
-          if (point < sortedbounds[mid_R]) seenR[idx] = seendicator; // lb below mid_R
-          else { // lb above/at mid_R
-            dividend_R += (2*idx - N - 1) * point;
+          if (point < nuR) seenR[idxN] = seendicator; // lb below nuR
+          else { // lb above/at nuR
+            dividend_R += (2*(iR++) - N - 1) * point;
             divisor_R += N * point;
+//            printf("    %% xi=%d ABOVE: dividend_R += %lli (= %lli)\n", idxN, (2*(iR-1) - N - 1) * point, dividend_R);
           }
         } else { // upper bound
-          if (point < sortedbounds[mid_L]) { // ub below mid_L
-            dividend_L += (2*idx - N - 1) * point;
+          if (point < nuL) { // ub below nuL
+            dividend_L += (2*(iL++) - N - 1) * point;
             divisor_L += N * point;
+//            printf("    %% xi=%d BELOW: dividend_L += %lli (= %lli)\n", idxN, (2*(iL-1) - N - 1) * point, dividend_L);
           } else { // ub above/at mid_L
-            if (seenL[idx] == seendicator) {
-              dividend_L += (2*idx - N - 1) * sortedbounds[mid_L];
-              divisor_L += N * sortedbounds[mid_L];
+            if (seenL[idxN] == seendicator) {
+              dividend_L += (2*(iL++) - N - 1) * nuL;
+              divisor_L += N * nuL;
+//              printf("    %% xi=%d OVERLAP: dividend_L += %lli (= %lli)\n", idxN, (2*(iL-1) - N - 1) * nuL, dividend_L);
             }
           }
-          if (point < sortedbounds[mid_R]) { // ub below mid_R
-            dividend_R += (2*idx - N - 1) * point;
+          if (point < nuR) { // ub below nuR
+            dividend_R += (2*(iR++) - N - 1) * point;
             divisor_R += N * point;
-          } else { // ub above/at mid_R
-            if (seenL[idx] == seendicator) {
-              dividend_R += (2*idx - N - 1) * sortedbounds[mid_R];
-              divisor_R += N * sortedbounds[mid_R];
+//            printf("    %% xi=%d BELOW: dividend_R += %lli (= %lli)\n", idxN, (2*(iR-1) - N - 1) * point, dividend_R);
+          } else { // ub above/at nuR
+            if (seenR[idxN] == seendicator) {
+              dividend_R += (2*(iR++) - N - 1) * nuR;
+              divisor_R += N * nuR;
+//              printf("    %% xi=%d OVERLAP: dividend_R += %lli (= %lli)\n", idxN, (2*(iR-1) - N - 1) * nuR, dividend_R);
             }
           }
         }
-      }
+      } //assert(iL == N+1 && iR == N+1);
+
+//      printf("  %% divisor_L, divisor_R = %lli, %lli\n", divisor_L, divisor_R);
 
       const int reset = std::fegetround();
       std::fesetround(FE_DOWNWARD);
 //      auto G_Lraw = ((long double) (dividend_L )) / (long double) divisor_L;
 //      auto G_Rraw = ((long double) (dividend_R )) / (long double) divisor_R;
-      auto G_L = (int64_t) ((long double) (dividend_L * scale)) / (long double) divisor_L;
-      auto G_R = (int64_t) ((long double) (dividend_R * scale)) / (long double) divisor_R;
+      auto G_L = (int64_t) (((long double) (dividend_L * scale)) / (long double) divisor_L);
+      auto G_R = (int64_t) (((long double) (dividend_R * scale)) / (long double) divisor_R);
       std::fesetround(reset);
+
+//      printf("  %% G_L, G_R = %lli, %lli\n", G_L, G_R);
 
 //      printf("%% PRE LB Prop %%, (V_L at mid_L, V_R at mid_R) = (%lli at %lli, %lli at %lli)\n", V_L, mid_L, V_R, mid_R);
 //      printf("  %% Sq_L=%lli, Sq_R=%lli, M_L=%lli, M_R=%lli\n", Sq_L, Sq_R, M_L, M_R);
@@ -2011,7 +2060,11 @@ public:
         scan = true;
         if (L < mid_L) mid_L--;
         else if (mid_R < R) mid_R++;
-        else break;
+        else {
+          M = mid_L;
+          G = G_L;
+          break;
+        }
         //printf("%% warning: G_L == G_R.\n");
         //assert(G_Lraw != G_Rraw);
         //return true;
@@ -2034,22 +2087,44 @@ public:
     //auto scaled_var = (int64_t) (((long double) (V * scale)) / (N*N*N));
     //std::fesetround(reset);
 
+//    printf("%% PRE LB Prop %%\n");
+//    for (int i = 0; i < N; ++i) printf("   %% x[%d] = %d..%d      ", i, x[i]->getMin(), x[i]->getMax());
+//    printf("%% y = %d..%d      ", y->getMin(), y->getMax());
+//    printf("%% s = %d..%d\n", s->getMin(), s->getMax());
+//    printf("   %% want to set y to %lli when it is %d..%d\n", G, y->getMin(), y->getMax());
+//    printf("   %% nu idx = %d (pos %d), Mx (nu) = %d\n", sortedbounds[M].v, M, Mx.v);
+//    printf("%% --->\n");
     if (y->setMinNotR(G)) {
       //n_prop_v_lb++;
       Clause* r = nullptr;
       if(so.lazy) {
-        Lit lit[N+2];
+        Lit lit[2*N+2];
         int lits = 0;
+//        printf("constraint (");
         for(int ii = 0; ii < N; ++ii) {
-          if      (pos[ii] ==  1) lit[lits++] = x[ii]->getMinLit();
-          else if (pos[ii] == -1) lit[lits++] = x[ii]->getMaxLit();
-          //else if (pos[ii] ==  0) {
+          //if      (pos[ii] ==  1) {
           //  lit[lits++] = x[ii]->getMinLit();
+//        //    printf("util[%d] >= %d /\\ ", ii+1, x[ii]->getMin());
+          //}
+          //else if (pos[ii] == -1) {
           //  lit[lits++] = x[ii]->getMaxLit();
+//            printf("util[%d] <= %d /\\ ", ii+1, x[ii]->getMax());
+          //}
+          //else if (pos[ii] ==  0) {
+          lit[lits++] = x[ii]->getMinLit();
+          lit[lits++] = x[ii]->getMaxLit();
           //}
         }
-        if (M == s->getMin()) lit[lits++] = s->getMinLit();
-        if (M == s->getMax()) lit[lits++] = s->getMaxLit();
+//        if (M == s->getMin()) {
+//          lit[lits++] = s->getMinLit();
+//          printf("UTIL >= %d /\\ ", s->getMin());
+//        }
+//        if (M == s->getMax()) {
+//          lit[lits++] = s->getMaxLit();
+//          printf("UTIL <= %d /\\ ", s->getMax());
+//        }
+
+//        printf("true) -> (disp >= %d); %% EXPL\n", G);
 
         // lit[lits++] = y->getMinLit();
         // lit[lits++] = y->getMaxLit();
@@ -2061,7 +2136,9 @@ public:
 //      for (int i = 0; i < N; ++i) printf("   %% x[%d] = %d..%d      ", i, x[i]->getMin(), x[i]->getMax());
 //      printf("%% y = %d..%d      ", y->getMin(), y->getMax());
 //      printf("%% s = %d..%d\n", s->getMin(), s->getMax());
-//      printf("   %% want to set y to %lli when it is %d..%d\n", scaled_var, y->getMin(), y->getMax());
+//      printf("   %% want to set y to %lli when it is %d..%d\n", G, y->getMin(), y->getMax());
+//      printf("   %% nu idx = %d (pos %d), Mx (nu) = %d\n", sortedbounds[M].v, M, Mx.v);
+//      printf("%% <<<<---\n");
       if(!y->setMin(G, r)) {
         //n_incons_v_lb++;
         return false;
