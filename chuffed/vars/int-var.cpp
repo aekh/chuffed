@@ -31,7 +31,8 @@ IntVar::IntVar(int _min, int _max) :
   , activity(0)
   , in_queue(false)
 {
-	assert(min_limit <= min && min <= max && max <= max_limit);
+  printf("%% %d <= %d <= %d <= %d\n", min_limit, min, max, max_limit);
+  assert(min_limit <= min && min <= max && max <= max_limit);
 	engine.vars.push(this);
 	changes = EVENT_C | EVENT_L | EVENT_U;
 	if (isFixed()) changes |= EVENT_F;
