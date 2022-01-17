@@ -45,6 +45,8 @@ IntVar* newIntVar(int min, int max) {
 	if (sizeof(IntVarLL) > size) size = sizeof(IntVarLL);
 	if (sizeof(IntVarSL) > size) size = sizeof(IntVarSL);
 	void *mem = malloc(size);
+	if (mem == NULL)
+	  assert(false && "Memory error during variable initialization.");
 	IntVar *var = new (mem) IntVar(min, max);
 	return var;
 }
