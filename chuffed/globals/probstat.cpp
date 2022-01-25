@@ -18,6 +18,8 @@ public:
   int mode;
   int counter_prop;
 
+  bool daemon;
+
   Tint ub_idx = NULL;
   Tint lb_idx = NULL;
 
@@ -66,6 +68,8 @@ public:
     priority = 3;
     all_fixed = 0;
     subsumed = 0;
+    if (mode == 10) {daemon = false; mode = 9;}
+    else daemon = true;
     switch (mode) {
       case 1: // version 1
       case 2: // version 1 approx c
@@ -103,7 +107,7 @@ public:
       //all_fixed = all_fixed_;
     }
 
-    if (mode == 9 && glb <= lub) { // Trivial case: var >= 0;
+    if (mode == 9 && glb <= lub && daemon) { // Trivial case: var >= 0;
       if (i < N && c & EVENT_U && x[i]->getMax() < lub)
         lub = x[i]->getMax();
       if (i < N && c & EVENT_L && x[i]->getMin() > glb)
@@ -113,7 +117,7 @@ public:
       return;
     }
 
-    if (!all_fixed && mode == 9 && i < N) { // FIXME fix if run again
+    if (!all_fixed && mode == 9 && i < N && daemon) { // FIXME fix if run again
       int64_t xlb = N*x[i]->getMin();
       int64_t xub = N*x[i]->getMax();
       if (c & EVENT_U) {
@@ -1776,6 +1780,8 @@ public:
   int scale;
   int mode;
 
+  bool daemon;
+
   vec<Tint> pos;
 
   Tint subsumed;
@@ -1800,6 +1806,8 @@ public:
     all_fixed = 0;
     hasM = 0;
 
+    if (mode == 10) {daemon = false; mode = 9;}
+    else daemon = true;
     switch (mode) {
       case 0: // filter y when x fixed
         for (int i = 0; i < N; ++i) x[i]->attach(this, i, EVENT_F);
@@ -1933,7 +1941,7 @@ public:
       }
     }
 
-    if (mode == 9 && glb <= lub) { // Trivial case: Gini >= 0;
+    if (mode == 9 && glb <= lub && daemon) { // Trivial case: Gini >= 0;
 //      printf("%% TRIV CASE\n");
       if (i < N && c & EVENT_U && x[i]->getMax() < lub)
         lub = x[i]->getMax();
@@ -1944,7 +1952,7 @@ public:
       return;
     }
 
-    if (!all_fixed && mode == 9 && i < N && hasM) {
+    if (!all_fixed && mode == 9 && i < N && hasM && daemon) {
 //      printf("%% bounds case\n");
       int64_t xlb = x[i]->getMin();
       int64_t xub = x[i]->getMax();
