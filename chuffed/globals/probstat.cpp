@@ -2106,21 +2106,20 @@ public:
       //n_prop_v_lb++;
       Clause* r = nullptr;
       if(so.lazy) {
-        Lit lit[2*N+2];
+        Lit lit[N];
         int lits = 0;
 //        printf("constraint (");
         for(int ii = 0; ii < N; ++ii) {
-          //if      (pos[ii] ==  1) {
-          //  lit[lits++] = x[ii]->getMinLit();
+          if      (pos[ii] ==  1) {
+            lit[lits++] = x[ii]->getMinLit();
 //        //    printf("util[%d] >= %d /\\ ", ii+1, x[ii]->getMin());
-          //}
-          //else if (pos[ii] == -1) {
-          //  lit[lits++] = x[ii]->getMaxLit();
+          } else if (pos[ii] == -1) {
+            lit[lits++] = x[ii]->getMaxLit();
 //            printf("util[%d] <= %d /\\ ", ii+1, x[ii]->getMax());
-          //}
+          }
           //else if (pos[ii] ==  0) {
-          lit[lits++] = x[ii]->getMinLit();
-          lit[lits++] = x[ii]->getMaxLit();
+          //lit[lits++] = x[ii]->getMinLit();
+          //lit[lits++] = x[ii]->getMaxLit();
           //}
         }
 //        if (M == s->getMin()) {
