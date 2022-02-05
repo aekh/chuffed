@@ -2108,18 +2108,24 @@ public:
       if(so.lazy) {
         Lit lit[2*N];
         int lits = 0;
-//        printf("%% --->\n");
-//        printf("constraint (");
+        printf("%% --->\n");
+        printf("%%:%% constraint (");
         for(int ii = 0; ii < N; ++ii) {
           if (pos[ii] == 0) {
-            if (x[ii]->getMin() == Mx.v) lit[lits++] = x[ii]->getMinLit();
-            if (x[ii]->getMax() == Mx.v) lit[lits++] = x[ii]->getMaxLit();
+            if (x[ii]->getMin() == Mx.v) {
+              lit[lits++] = x[ii]->getMinLit();
+              printf("util[%d] >= %d /\\ ", ii+1, x[ii]->getMin());
+            }
+            if (x[ii]->getMax() == Mx.v) {
+              lit[lits++] = x[ii]->getMaxLit();
+              printf("util[%d] <= %d /\\ ", ii+1, x[ii]->getMax());
+            }
           } else if (pos[ii] == 1) {
             lit[lits++] = x[ii]->getMinLit();
-//            printf("util[%d] >= %d /\\ ", ii+1, x[ii]->getMin());
+            printf("util[%d] >= %d /\\ ", ii+1, x[ii]->getMin());
           } else if (pos[ii] == -1) {
             lit[lits++] = x[ii]->getMaxLit();
-//            printf("util[%d] <= %d /\\ ", ii+1, x[ii]->getMax());
+            printf("util[%d] <= %d /\\ ", ii+1, x[ii]->getMax());
           }
           //else if (pos[ii] ==  0) {
           //lit[lits++] = x[ii]->getMinLit();
@@ -2135,7 +2141,7 @@ public:
 //          printf("UTIL <= %d /\\ ", s->getMax());
 //        }
 
-//        printf("true) -> (disp >= %d); %% EXPL\n", G);
+        printf("true) -> (disp >= %d); %% EXPL\n", G);
 
         // lit[lits++] = y->getMinLit();
         // lit[lits++] = y->getMaxLit();
@@ -2143,13 +2149,13 @@ public:
         for(int ii = 0; ii < lits; ++ii) (*r)[ii+1] = lit[ii];
       }
 //      if (scaled_var >= INT64_MAX)
-//      printf("%% LB Prop %%\n");
-//      for (int i = 0; i < N; ++i) printf("   %% x[%d] = %d..%d      ", i, x[i]->getMin(), x[i]->getMax());
-//      printf("%% y = %d..%d      ", y->getMin(), y->getMax());
-//      printf("%% s = %d..%d\n", s->getMin(), s->getMax());
-//      printf("   %% want to set y to %lli when it is %d..%d\n", G, y->getMin(), y->getMax());
-//      printf("   %% nu idx = %d (pos %d), Mx (nu) = %d\n", sortedbounds[M].v, M, Mx.v);
-//      printf("%% <<<<---\n");
+      printf("%% LB Prop %%\n");
+      for (int i = 0; i < N; ++i) printf("   %% x[%d] = %d..%d      ", i, x[i]->getMin(), x[i]->getMax());
+      printf("%% y = %d..%d      ", y->getMin(), y->getMax());
+      printf("%% s = %d..%d\n", s->getMin(), s->getMax());
+      printf("   %% want to set y to %lli when it is %d..%d\n", G, y->getMin(), y->getMax());
+      printf("   %% nu idx = %d (pos %d), Mx (nu) = %d\n", sortedbounds[M].v, M, Mx.v);
+      printf("%% <<<<---\n");
       if(!y->setMin(G, r)) {
         //n_incons_v_lb++;
         return false;
