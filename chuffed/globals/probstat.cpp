@@ -26,6 +26,7 @@ public:
   int counter_prop;
 
   bool daemon;
+  bool trivlearn;
 
   Tint ub_idx = NULL;
   Tint lb_idx = NULL;
@@ -77,6 +78,8 @@ public:
     subsumed = 0;
     if (mode == 10) {daemon = false; mode = 9;}
     else daemon = true;
+    if (mode == 11) {trivlearn = true; mode = 9;}
+    else trivlearn = false;
     switch (mode) {
       case 6:
         init_dc();
@@ -483,47 +486,33 @@ public:
       n_prop_v_lb++;
       Clause* r = nullptr;
       if(so.lazy) {
-        Lit lit[2*N+2];
+        Lit lit[2 * N + 2];
         int lits = 0;
-//        printf("constraint (");
-        for(int ii = 0; ii < N; ++ii) {
-          if      (pos[ii] ==  1) {
+        if (trivlearn) {
+          for (int ii = 0; ii < N; ++ii) {
             lit[lits++] = x[ii]->getMinLit();
-//            printf(" util[%d] >= %d /\\ ", ii+1, x[ii]->getMin());
-          }
-          else if (pos[ii] == -1) {
             lit[lits++] = x[ii]->getMaxLit();
-//            printf(" util[%d] <= %d /\\ ", ii+1, x[ii]->getMax());
           }
-          //else if (pos[ii] ==  0) {
-          //  lit[lits++] = x[ii]->getMinLit();
-          //  lit[lits++] = x[ii]->getMaxLit();
-          //}
-        }
-        if (M == s->getMin()) {
           lit[lits++] = s->getMinLit();
-//          printf(" UTIL <= %d /\\ ", s->getMax());
-        }
-        if (M == s->getMax()) {
           lit[lits++] = s->getMaxLit();
-//          printf(" UTIL <= %d /\\ ", s->getMax());
+        } else {
+          for (int ii = 0; ii < N; ++ii) {
+            if (pos[ii] == 1) {
+              lit[lits++] = x[ii]->getMinLit();
+            } else if (pos[ii] == -1) {
+              lit[lits++] = x[ii]->getMaxLit();
+            }
+          }
+          if (M == s->getMin()) {
+            lit[lits++] = s->getMinLit();
+          }
+          if (M == s->getMax()) {
+            lit[lits++] = s->getMaxLit();
+          }
         }
-
-//        printf(" true) -> ( disp >= %d (actually %lli) ); %% EXPL\n", scaled_var, scaled_var);
-
-        // lit[lits++] = y->getMinLit();
-        // lit[lits++] = y->getMaxLit();
-        r = Reason_new(lits+1);
-        for(int ii = 0; ii < lits; ++ii) (*r)[ii+1] = lit[ii];
+        r = Reason_new(lits + 1);
+        for (int ii = 0; ii < lits; ++ii) (*r)[ii + 1] = lit[ii];
       }
-//      if (scaled_var >= INT64_MAX)
-//      if (x[1]->getMin() == 3192 && x[2]->getMin() == 3041 && scaled_var == 1428) {
-//        printf("%% LB Prop %%\n");
-//        for (int i = 0; i < N; ++i) printf("   %% x[%d] = %d..%d      ", i, x[i]->getMin(), x[i]->getMax());
-//        printf("%% y = %d..%d      ", y->getMin(), y->getMax());
-//        printf("%% s = %d..%d\n", s->getMin(), s->getMax());
-//        printf("   %% want to set y to %lli when it is %d..%d\n", scaled_var, y->getMin(), y->getMax());
-//      }
       if(!y->setMin(scaled_var, r)) {
         n_incons_v_lb++;
         return false;
@@ -544,6 +533,7 @@ public:
   int mode;
 
   bool daemon;
+  bool trivlearn;
 
   vec<Tint> pos;
 
@@ -571,6 +561,8 @@ public:
 
     if (mode == 10) {daemon = false; mode = 9;}
     else daemon = true;
+    if (mode == 11) {trivlearn = true; mode = 9;}
+    else trivlearn = false;
     switch (mode) {
       case 0: // filter y when x fixed
         for (int i = 0; i < N; ++i) x[i]->attach(this, i, EVENT_F);
@@ -853,30 +845,36 @@ public:
       if(so.lazy) {
         Lit lit[2*N];
         int lits = 0;
+        if(trivlearn) {
+          for(int ii = 0; ii < N; ++ii) {
+            lit[lits++] = x[ii]->getMinLit();
+            lit[lits++] = x[ii]->getMaxLit();
+          }
+        } else {
 //        printf("%% ---> LB Alg\n");
 //        printf("%%:%% constraint (");
-        for(int ii = 0; ii < N; ++ii) {
-          if (pos[ii] == 0) {
-            if (x[ii]->getMin() == Mx.v) {
-              lit[lits++] = x[ii]->getMinLit();
+          for(int ii = 0; ii < N; ++ii) {
+            if (pos[ii] == 0) {
+              if (x[ii]->getMin() == Mx.v) {
+                lit[lits++] = x[ii]->getMinLit();
 //              printf("util[%d] >= %d /\\ ", ii+1, x[ii]->getMin());
-            }
-            if (x[ii]->getMax() == Mx.v) {
-              lit[lits++] = x[ii]->getMaxLit();
+              }
+              if (x[ii]->getMax() == Mx.v) {
+                lit[lits++] = x[ii]->getMaxLit();
 //              printf("util[%d] <= %d /\\ ", ii+1, x[ii]->getMax());
-            }
-          } else if (pos[ii] == 1) {
-            lit[lits++] = x[ii]->getMinLit();
+              }
+            } else if (pos[ii] == 1) {
+              lit[lits++] = x[ii]->getMinLit();
 //            printf("util[%d] >= %d /\\ ", ii+1, x[ii]->getMin());
-          } else if (pos[ii] == -1) {
-            lit[lits++] = x[ii]->getMaxLit();
+            } else if (pos[ii] == -1) {
+              lit[lits++] = x[ii]->getMaxLit();
 //            printf("util[%d] <= %d /\\ ", ii+1, x[ii]->getMax());
+            }
+            //else if (pos[ii] ==  0) {
+            //lit[lits++] = x[ii]->getMinLit();
+            //lit[lits++] = x[ii]->getMaxLit();
+            //}
           }
-          //else if (pos[ii] ==  0) {
-          //lit[lits++] = x[ii]->getMinLit();
-          //lit[lits++] = x[ii]->getMaxLit();
-          //}
-        }
 //        if (M == s->getMin()) {
 //          lit[lits++] = s->getMinLit();
 //          printf("UTIL >= %d /\\ ", s->getMin());
@@ -888,8 +886,9 @@ public:
 
 //        printf("true) -> (disp >= %d); %% EXPL\n", G);
 
-        // lit[lits++] = y->getMinLit();
-        // lit[lits++] = y->getMaxLit();
+          // lit[lits++] = y->getMinLit();
+          // lit[lits++] = y->getMaxLit();
+        }
         r = Reason_new(lits+1);
         for(int ii = 0; ii < lits; ++ii) (*r)[ii+1] = lit[ii];
       }
