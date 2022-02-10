@@ -1203,10 +1203,10 @@ namespace FlatZinc {
 */
         registry().add("variance_int", &p_variance_int);
         registry().add("gini_int", &p_gini_int);
-        registry().add("cov_sq", &p_covsq);
+//        registry().add("cov_sq", &p_covsq);
 
-        registry().add("spread_fast", &p_spread_fast);
-        registry().add("spread_bounds", &p_spread_bounds);
+//        registry().add("spread_fast", &p_spread_fast);
+//        registry().add("spread_bounds", &p_spread_bounds);
 			}
 		};
 		IntPoster __int_poster;
