@@ -840,22 +840,22 @@ namespace FlatZinc {
 			int mode = ce[4]->getInt();
 			gini_int(getIntVar(ce[0]), iv, getIntVar(ce[2]), scale, mode);
 		}
-		void p_covsq(const ConExpr& ce, AST::Node* ann) {
-      vec<IntVar*> iv; arg2intvarargs(iv, ce[1]);
-			int scale = ce[2]->getInt();
-			covsq(getIntVar(ce[0]), iv, scale);
-		}
-    void p_spread_fast(const ConExpr& ce, AST::Node* ann) {
-      vec<IntVar*> iv; arg2intvarargs(iv, ce[0]);
-      vec<IntVar*> cl; arg2intvarargs(iv, ce[1]);
-      int scale = ce[5]->getInt();
-      spread_fast(iv, cl, getIntVar(ce[2]), getIntVar(ce[3]), getIntVar(ce[4]), scale);
-    }
-    void p_spread_bounds(const ConExpr& ce, AST::Node* ann) {
-      vec<IntVar*> iv; arg2intvarargs(iv, ce[0]);
-      int scale = ce[4]->getInt();
-      spread_bounds(iv, getIntVar(ce[1]), getIntVar(ce[2]), getIntVar(ce[3]), scale);
-    }
+//		void p_covsq(const ConExpr& ce, AST::Node* ann) {
+//      vec<IntVar*> iv; arg2intvarargs(iv, ce[1]);
+//			int scale = ce[2]->getInt();
+//			covsq(getIntVar(ce[0]), iv, scale);
+//		}
+//    void p_spread_fast(const ConExpr& ce, AST::Node* ann) {
+//      vec<IntVar*> iv; arg2intvarargs(iv, ce[0]);
+//      vec<IntVar*> cl; arg2intvarargs(iv, ce[1]);
+//      int scale = ce[5]->getInt();
+//      spread_fast(iv, cl, getIntVar(ce[2]), getIntVar(ce[3]), getIntVar(ce[4]), scale);
+//    }
+//    void p_spread_bounds(const ConExpr& ce, AST::Node* ann) {
+//      vec<IntVar*> iv; arg2intvarargs(iv, ce[0]);
+//      int scale = ce[4]->getInt();
+//      spread_bounds(iv, getIntVar(ce[1]), getIntVar(ce[2]), getIntVar(ce[3]), scale);
+//    }
 
 
 /*
