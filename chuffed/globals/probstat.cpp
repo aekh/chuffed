@@ -933,7 +933,6 @@ public:
         (*r)[ii+1] = x[ii]->getValLit();
         printf("util[%d] == %d /\\ ", ii+1, x[ii]->getValLit());
       }
-      printf("true) -> (disp == %d); %% EXPL FIX\n", gini);
     }
 
     const int reset = std::fegetround();
@@ -941,6 +940,8 @@ public:
     auto gini_f = (long double) diff / (long double) (N * sum);
     int64_t gini = (int64_t) gini_f;
     std::fesetround(reset);
+
+    printf("true) -> (disp == %d); %% EXPL FIX\n", gini);
 
     for (int i = 0; i < N; ++i) printf("   %% x[%d] = %d..%d      ", i, x[i]->getMin(), x[i]->getMax());
     printf("%% y = %d..%d      ", y->getMin(), y->getMax());
