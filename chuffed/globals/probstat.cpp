@@ -795,10 +795,12 @@ public:
 
       const int reset = std::fegetround();
       std::fesetround(FE_DOWNWARD);
-//      auto G_Lraw = ((long double) (dividend_L )) / (long double) divisor_L;
-//      auto G_Rraw = ((long double) (dividend_R )) / (long double) divisor_R;
+      auto G_Lraw = ((long double) (dividend_L )) / (long double) divisor_L;
+      auto G_Rraw = ((long double) (dividend_R )) / (long double) divisor_R;
       auto G_L = (int64_t) (((long double) (dividend_L * scale)) / (long double) divisor_L);
       auto G_R = (int64_t) (((long double) (dividend_R * scale)) / (long double) divisor_R);
+//      auto G_L = (int64_t) G_Lraw;
+//      auto G_R = (int64_t) G_Rraw;
       std::fesetround(reset);
 
 //      printf("  %% G_L, G_R = %lli, %lli\n", G_L, G_R);
@@ -807,9 +809,9 @@ public:
 //      printf("  %% Sq_L=%lli, Sq_R=%lli, M_L=%lli, M_R=%lli\n", Sq_L, Sq_R, M_L, M_R);
 
       if (G_L == 0 || G_R == 0) {return true;} // worst lb found
-      if      (G_L < G_R) {G = G_L; M = mid_L; R = mid_L;} // search left
-      else if (G_L > G_R) {G = G_R; M = mid_R; L = mid_R;} // search right
-      else { // G_L == G_R
+      if      (G_Lraw < G_Rraw) {G = G_L; M = mid_L; R = mid_L;} // search left
+      else if (G_Lraw > G_Rraw) {G = G_R; M = mid_R; L = mid_R;} // search right
+      else { // G_Lraw == G_Rraw
         if (L < mid_L) {scan = true; mid_L--;} // scan left
         else if (mid_R < R) {G = G_R; M = mid_R; L = mid_R;} // cut left
         else {M = mid_R; G = G_R; break;} // minimum found
@@ -851,24 +853,24 @@ public:
             lit[lits++] = x[ii]->getMaxLit();
           }
         } else {
-        printf("%% ---> LB Alg\n");
-        printf("%%:%% constraint (");
+//        printf("%% ---> LB Alg\n");
+//        printf("%%:%% constraint (");
           for(int ii = 0; ii < N; ++ii) {
             if (pos[ii] == 0) {
               if (x[ii]->getMin() == Mx.v) {
                 lit[lits++] = x[ii]->getMinLit();
-              printf("util[%d] >= %d /\\ ", ii+1, x[ii]->getMin());
+//                printf("util[%d] >= %d /\\ ", ii+1, x[ii]->getMin());
               }
               if (x[ii]->getMax() == Mx.v) {
                 lit[lits++] = x[ii]->getMaxLit();
-              printf("util[%d] <= %d /\\ ", ii+1, x[ii]->getMax());
+//                printf("util[%d] <= %d /\\ ", ii+1, x[ii]->getMax());
               }
             } else if (pos[ii] == 1) {
               lit[lits++] = x[ii]->getMinLit();
-              printf("util[%d] >= %d /\\ ", ii+1, x[ii]->getMin());
+//              printf("util[%d] >= %d /\\ ", ii+1, x[ii]->getMin());
             } else if (pos[ii] == -1) {
               lit[lits++] = x[ii]->getMaxLit();
-              printf("util[%d] <= %d /\\ ", ii+1, x[ii]->getMax());
+//              printf("util[%d] <= %d /\\ ", ii+1, x[ii]->getMax());
             }
             //else if (pos[ii] ==  0) {
             //lit[lits++] = x[ii]->getMinLit();
@@ -884,7 +886,7 @@ public:
 //          printf("UTIL <= %d /\\ ", s->getMax());
 //        }
 
-        printf("true) -> (disp >= %d); %% EXPL LB\n", G);
+//        printf("true) -> (disp >= %d); %% EXPL LB\n", G);
 
           // lit[lits++] = y->getMinLit();
           // lit[lits++] = y->getMaxLit();
@@ -893,13 +895,13 @@ public:
         for(int ii = 0; ii < lits; ++ii) (*r)[ii+1] = lit[ii];
       }
 //      if (scaled_var >= INT64_MAX)
-      printf("%% LB Prop %%\n");
-      for (int i = 0; i < N; ++i) printf("   %% x[%d] = %d..%d      ", i, x[i]->getMin(), x[i]->getMax());
-      printf("%% y = %d..%d      ", y->getMin(), y->getMax());
-      printf("%% s = %d..%d\n", s->getMin(), s->getMax());
-      printf("   %% want to set y to %lli when it is %d..%d\n", G, y->getMin(), y->getMax());
-      printf("   %% nu idx = %d (pos %d), Mx (nu) = %d\n", sortedbounds[M].v, M, Mx.v);
-      printf("%% <<<<---\n");
+//      printf("%% LB Prop %%\n");
+//      for (int i = 0; i < N; ++i) printf("   %% x[%d] = %d..%d      ", i, x[i]->getMin(), x[i]->getMax());
+//      printf("%% y = %d..%d      ", y->getMin(), y->getMax());
+//      printf("%% s = %d..%d\n", s->getMin(), s->getMax());
+//      printf("   %% want to set y to %lli when it is %d..%d\n", G, y->getMin(), y->getMax());
+//      printf("   %% nu idx = %d (pos %d), Mx (nu) = %d\n", sortedbounds[M].v, M, Mx.v);
+//      printf("%% <<<<---\n");
       if(!y->setMin(G, r)) {
         //n_incons_v_lb++;
         return false;
@@ -927,11 +929,11 @@ public:
     if(so.lazy) {
       // Set up reason
       r = Reason_new(N+1);
-      printf("%% =======> FIX Prop %%\n");
-      printf("%%:%% constraint (");
+//      printf("%% =======> FIX Prop %%\n");
+//      printf("%%:%% constraint (");
       for(int ii = 0; ii < N; ++ii) {
         (*r)[ii+1] = x[ii]->getValLit();
-        printf("util[%d] == %d /\\ ", ii+1, x[ii]->getValLit());
+//        printf("util[%d] == %d /\\ ", ii+1, x[ii]->getValLit());
       }
     }
 
@@ -941,14 +943,14 @@ public:
     int64_t gini = (int64_t) gini_f;
     std::fesetround(reset);
 
-    printf("true) -> (disp == %d); %% EXPL FIX\n", gini);
+//    printf("true) -> (disp == %d); %% EXPL FIX\n", gini);
 
-    for (int i = 0; i < N; ++i) printf("   %% x[%d] = %d..%d      ", i, x[i]->getMin(), x[i]->getMax());
-    printf("%% y = %d..%d      ", y->getMin(), y->getMax());
-    printf("%% s = %d..%d\n", s->getMin(), s->getMax());
-    printf("   %% want to set y to %lli when it is %d..%d\n", gini, y->getMin(), y->getMax());
-    //printf("   %% nu idx = %d (pos %d), Mx (nu) = %d\n", sortedbounds[M].v, M, Mx.v);
-    printf("%% <<<<---\n");
+//    for (int i = 0; i < N; ++i) printf("   %% x[%d] = %d..%d      ", i, x[i]->getMin(), x[i]->getMax());
+//    printf("%% y = %d..%d      ", y->getMin(), y->getMax());
+//    printf("%% s = %d..%d\n", s->getMin(), s->getMax());
+//    printf("   %% want to set y to %lli when it is %d..%d\n", gini, y->getMin(), y->getMax());
+//    //printf("   %% nu idx = %d (pos %d), Mx (nu) = %d\n", sortedbounds[M].v, M, Mx.v);
+//    printf("%% <<<<---\n");
 
     // set y
     if(y->setValNotR(gini)) {
