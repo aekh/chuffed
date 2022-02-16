@@ -865,10 +865,10 @@ public:
               }
             } else if (pos[ii] == 1) {
               lit[lits++] = x[ii]->getMinLit();
-            printf("util[%d] >= %d /\\ ", ii+1, x[ii]->getMin());
+              printf("util[%d] >= %d /\\ ", ii+1, x[ii]->getMin());
             } else if (pos[ii] == -1) {
               lit[lits++] = x[ii]->getMaxLit();
-            printf("util[%d] <= %d /\\ ", ii+1, x[ii]->getMax());
+              printf("util[%d] <= %d /\\ ", ii+1, x[ii]->getMax());
             }
             //else if (pos[ii] ==  0) {
             //lit[lits++] = x[ii]->getMinLit();
@@ -884,7 +884,7 @@ public:
 //          printf("UTIL <= %d /\\ ", s->getMax());
 //        }
 
-        printf("true) -> (disp >= %d); %% EXPL\n", G);
+        printf("true) -> (disp >= %d); %% EXPL LB\n", G);
 
           // lit[lits++] = y->getMinLit();
           // lit[lits++] = y->getMaxLit();
@@ -927,7 +927,13 @@ public:
     if(so.lazy) {
       // Set up reason
       r = Reason_new(N+1);
-      for(int ii = 0; ii < N; ++ii) (*r)[ii+1] = x[ii]->getValLit();
+      printf("%% =======> FIX Prop %%\n");
+      printf("%%:%% constraint (");
+      for(int ii = 0; ii < N; ++ii) {
+        (*r)[ii+1] = x[ii]->getValLit();
+        printf("util[%d] == %d /\\ ", ii+1, x[ii]->getValLit());
+      }
+      printf("true) -> (disp == %d); %% EXPL FIX\n", gini);
     }
 
     const int reset = std::fegetround();
@@ -936,13 +942,12 @@ public:
     int64_t gini = (int64_t) gini_f;
     std::fesetround(reset);
 
-//    printf("%% =======> FIX Prop %%\n");
-//    for (int i = 0; i < N; ++i) printf("   %% x[%d] = %d..%d      ", i, x[i]->getMin(), x[i]->getMax());
-//    printf("%% y = %d..%d      ", y->getMin(), y->getMax());
-//    printf("%% s = %d..%d\n", s->getMin(), s->getMax());
-//    printf("   %% want to set y to %lli when it is %d..%d\n", gini, y->getMin(), y->getMax());
-//    //printf("   %% nu idx = %d (pos %d), Mx (nu) = %d\n", sortedbounds[M].v, M, Mx.v);
-//    printf("%% <<<<---\n");
+    for (int i = 0; i < N; ++i) printf("   %% x[%d] = %d..%d      ", i, x[i]->getMin(), x[i]->getMax());
+    printf("%% y = %d..%d      ", y->getMin(), y->getMax());
+    printf("%% s = %d..%d\n", s->getMin(), s->getMax());
+    printf("   %% want to set y to %lli when it is %d..%d\n", gini, y->getMin(), y->getMax());
+    //printf("   %% nu idx = %d (pos %d), Mx (nu) = %d\n", sortedbounds[M].v, M, Mx.v);
+    printf("%% <<<<---\n");
 
     // set y
     if(y->setValNotR(gini)) {
