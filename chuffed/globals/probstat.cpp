@@ -95,6 +95,7 @@ public:
   void wakeup(int i, int c) override {
     if (subsumed) return;
     n_wakeups++;
+    if (mode == 6) pushInQueue();
 
     if (!all_fixed && i < N && c & EVENT_F) {
       n_fixed++;
@@ -138,7 +139,8 @@ public:
     if (all_fixed) return checking_prop();
     switch (mode) {
       case 6:
-        return prop_x_dc();
+        //return prop_x_dc();
+        return true; //prop_domain();
       case 9: // Real version (as in paper)
         return prop_var_lb_real();
       default: // checking x, filter v
@@ -261,19 +263,19 @@ public:
   //------------//
 
   void init_dc() {
-    pos.growTo(N);
-    for (int i = 0; i < N; ++i) pos[i] = 2;
+    //pos.growTo(N);
+    //for (int i = 0; i < N; ++i) pos[i] = 2;
     for (int i = 0; i < N; i++) {
       x[i]->attach(this, i, EVENT_C);
     }
     y->attach(this, N, EVENT_C);
-    s->attach(this, N+1, EVENT_LU);
+    s->attach(this, N+1, EVENT_C);
 
-    int n_fixed_ = 0;
-    for (int i = 0; i < N; ++i) {
-      if (x[i]->isFixed()) n_fixed_++;
-    }
-    n_fixed = n_fixed_;
+    //int n_fixed_ = 0;
+    //for (int i = 0; i < N; ++i) {
+    //  if (x[i]->isFixed()) n_fixed_++;
+    //}
+    //n_fixed = n_fixed_;
   }
 
   bool prop_x_dc(){
@@ -427,6 +429,32 @@ public:
     // Success
     return true;
   }
+
+//  struct node {
+//    IntVar &x;
+//    int val;
+//  };
+//
+//  void push_domain(IntVar &x, std::stack<node> &nodestack) {
+//    for (int i = x.getMin(); i <= x.getMax(); ++i) {
+//      if (!x.indomain(i)) continue;
+//      node item = {x, i};
+//      nodestack.push(item);
+//    }
+//  }
+//
+//  bool prop_domain() {
+//    int values[N+1];
+//    for (int i = 0; i <= N+1; ++i) {
+//      std::vector<IntVar&> tree;
+//      //IntVar &tree[N+1];
+//      for (int j = 0; j <= N+1; ++i) {
+//
+//      }
+//      std::stack<node> nodestack;
+//      push_domain();
+//    }
+//  }
 
   //---------//
   // Best LB // mode = 9
@@ -795,8 +823,6 @@ public:
 
       const int reset = std::fegetround();
       std::fesetround(FE_DOWNWARD);
-      auto G_Lraw = ((long double) (dividend_L )) / (long double) divisor_L;
-      auto G_Rraw = ((long double) (dividend_R )) / (long double) divisor_R;
       auto G_L = (int64_t) (((long double) (dividend_L * scale)) / (long double) divisor_L);
       auto G_R = (int64_t) (((long double) (dividend_R * scale)) / (long double) divisor_R);
 //      auto G_L = (int64_t) G_Lraw;
@@ -809,10 +835,18 @@ public:
 //      printf("  %% Sq_L=%lli, Sq_R=%lli, M_L=%lli, M_R=%lli\n", Sq_L, Sq_R, M_L, M_R);
 
       if (G_L == 0 || G_R == 0) {return true;} // worst lb found
-      if      (G_Lraw < G_Rraw) {G = G_L; M = mid_L; R = mid_L;} // search left
-      else if (G_Lraw > G_Rraw) {G = G_R; M = mid_R; L = mid_R;} // search right
-      else { // G_Lraw == G_Rraw
-        if (L < mid_L) {scan = true; mid_L--;} // scan left
+      if      (G_L < G_R) {G = G_L; M = mid_L; R = mid_L;} // search left
+      else if (G_L > G_R) {G = G_R; M = mid_R; L = mid_R;} // search right
+      else { // G_L == G_R, check with G_Lraw and G_Rraw
+        const int reset = std::fegetround();
+        std::fesetround(FE_DOWNWARD);
+        auto G_Lraw = ((long double) (dividend_L )) / (long double) divisor_L;
+        auto G_Rraw = ((long double) (dividend_R )) / (long double) divisor_R;
+        std::fesetround(reset);
+
+        if      (G_Lraw < G_Rraw) {G = G_L; M = mid_L; R = mid_L;} // search left
+        else if (G_Lraw > G_Rraw) {G = G_R; M = mid_R; L = mid_R;} // search right
+        else if (L < mid_L) {scan = true; mid_L--;} // scan left
         else if (mid_R < R) {G = G_R; M = mid_R; L = mid_R;} // cut left
         else {M = mid_R; G = G_R; break;} // minimum found
       }
