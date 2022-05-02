@@ -143,7 +143,7 @@ public:
     switch (mode) {
       case 6:
         //return prop_x_dc();
-        return prop_var_ub() && prop_var_lb_real() && prop_domain();
+        return prop_var_ub() && prop_var_lb_real(); // && prop_domain();
       case 9: // Real version (as in paper)
         return prop_var_lb_real();
       default: // checking x, filter v
@@ -475,112 +475,112 @@ public:
     }
     return true;
   }
-
-  struct node {
-    int idx;
-    int val;
-  };
-
-  int push_domain(int i, std::stack<node> &nodestack, int ignore) {
-//    printf("%% push_domain, i=%d\n", i);
-    if (i == ignore) i++;
-    if (i < N) {
-      for (int val = x[i]->getMin(); val <= x[i]->getMax(); ++val) {
-        if (!x[i]->indomain(i)) continue;
-        node item = {i, val};
-        nodestack.push(item);
-      }
-    } else if (i == N) {
-      for (int val = s->getMin(); val <= s->getMax(); ++val) {
-        if (!s->indomain(i)) continue;
-        node item = {i, val};
-        nodestack.push(item);
-      }
-    } else if (i == N+1) {
-      for (int val = y->getMin(); val <= y->getMax(); ++val) {
-        if (!y->indomain(i)) continue;
-        node item = {i, val};
-        nodestack.push(item);
-      }
-    } else return 1;
-    return 0;
-  }
-
-  bool prop_domain() {
-    for (int i = 0; i <= N+1; ++i) {
-      //printf("%% FOR! i == %d\n", i);
-      int assign[N+2];
-      std::stack<node> headstack;
-      push_domain(i, headstack, -1);
-      while (!headstack.empty()) {
-//        printf("%% ....WHILE!\n");
-        node hd = headstack.top();
-        headstack.pop();
-        assign[hd.idx] = hd.val;
-        std::stack<node> nodestack;
-        push_domain(0, nodestack, i);
-        bool support = false;
-        while (!nodestack.empty()) {
-//          printf("%% ........WHILE!\n");
-          node nd = nodestack.top();
-//          printf("%% node nd = nodestack.top(); done\n");
-          nodestack.pop();
-//          printf("%% nodestack.pop(); done\n");
-          assign[nd.idx] = nd.val;
-//          printf("%% assign[nd.idx] = nd.val; done\n");
-          push_domain(nd.idx+1, nodestack, i);
-//          printf("%% push_domain(nd.idx+1, nodestack, i); done\n");
-          if (nd.idx+1 > N+1) {
-            int64_t sumx = 0;
-            for (int i = 0; i < N; i++) sumx += assign[i];
-
-            if (sumx != assign[N]) continue;
-
-            int64_t sqdiff = 0;
-            for (int i = 0; i < N; i++) {
-              int64_t diff = N * assign[i] - sumx;
-              sqdiff += diff * diff;
-            }
-
-            long double result_f = (long double) sqdiff / (long double) (N*N*N);
-            int64_t result = (int64_t) (result_f * scale);
-
-//            for (int i = 0; i < N; i++) {cout << "%% x[" << i+1 << "] = " << assign[i] << ",   ";}
-//            cout << "sum = " << assign[N] << ",   var = " << assign[N+1] << std::endl;
-            if (result == assign[N+1]) {
-              support = true;
-//              cout << "%% supported!" << std::endl;
-              break;
-            }
-          }
-//          cout << "%% UNsupported!" << std::endl;
-        }
-//        cout << "%% ---> Removal? nodestack len:" << nodestack.size() << ", headstack len:" << headstack.size() << ", i == " << i << std::endl;
-        if (hd.idx < N && !support
-              && !x[hd.idx]->remValNotR(hd.val)
-              && !x[hd.idx]->remVal(hd.val, nullptr)) {
-//          cout << "%% -----> FAIL" << std::endl;
-          return false;
-        }
-        if (hd.idx == N && !support
-            && !s->remValNotR(hd.val)
-            && !s->remVal(hd.val, nullptr)) {
-//          cout << "%% -----> FAIL" << std::endl;
-          return false;
-        }
-        if (hd.idx == N+1 && !support
-                     && !y->remValNotR(hd.val)
-                     && !y->remVal(hd.val, nullptr)) {
-//          cout << "%% -----> FAIL" << std::endl;
-          return false;
-        }
-//        cout << "%% -----> Nope" << std::endl;
-      }
-    }
-//    cout << "%% RETURN true" << std::endl;
-    return true;
-  }
-
+//
+//  struct node {
+//    int idx;
+//    int val;
+//  };
+//
+//  int push_domain(int i, std::stack<node> &nodestack, int ignore) {
+////    printf("%% push_domain, i=%d\n", i);
+//    if (i == ignore) i++;
+//    if (i < N) {
+//      for (int val = x[i]->getMin(); val <= x[i]->getMax(); ++val) {
+//        if (!x[i]->indomain(i)) continue;
+//        node item = {i, val};
+//        nodestack.push(item);
+//      }
+//    } else if (i == N) {
+//      for (int val = s->getMin(); val <= s->getMax(); ++val) {
+//        if (!s->indomain(i)) continue;
+//        node item = {i, val};
+//        nodestack.push(item);
+//      }
+//    } else if (i == N+1) {
+//      for (int val = y->getMin(); val <= y->getMax(); ++val) {
+//        if (!y->indomain(i)) continue;
+//        node item = {i, val};
+//        nodestack.push(item);
+//      }
+//    } else return 1;
+//    return 0;
+//  }
+//
+//  bool prop_domain() {
+//    for (int i = 0; i <= N+1; ++i) {
+//      //printf("%% FOR! i == %d\n", i);
+//      int assign[N+2];
+//      std::stack<node> headstack;
+//      push_domain(i, headstack, -1);
+//      while (!headstack.empty()) {
+////        printf("%% ....WHILE!\n");
+//        node hd = headstack.top();
+//        headstack.pop();
+//        assign[hd.idx] = hd.val;
+//        std::stack<node> nodestack;
+//        push_domain(0, nodestack, i);
+//        bool support = false;
+//        while (!nodestack.empty()) {
+////          printf("%% ........WHILE!\n");
+//          node nd = nodestack.top();
+////          printf("%% node nd = nodestack.top(); done\n");
+//          nodestack.pop();
+////          printf("%% nodestack.pop(); done\n");
+//          assign[nd.idx] = nd.val;
+////          printf("%% assign[nd.idx] = nd.val; done\n");
+//          push_domain(nd.idx+1, nodestack, i);
+////          printf("%% push_domain(nd.idx+1, nodestack, i); done\n");
+//          if (nd.idx+1 > N+1) {
+//            int64_t sumx = 0;
+//            for (int i = 0; i < N; i++) sumx += assign[i];
+//
+//            if (sumx != assign[N]) continue;
+//
+//            int64_t sqdiff = 0;
+//            for (int i = 0; i < N; i++) {
+//              int64_t diff = N * assign[i] - sumx;
+//              sqdiff += diff * diff;
+//            }
+//
+//            long double result_f = (long double) sqdiff / (long double) (N*N*N);
+//            int64_t result = (int64_t) (result_f * scale);
+//
+////            for (int i = 0; i < N; i++) {cout << "%% x[" << i+1 << "] = " << assign[i] << ",   ";}
+////            cout << "sum = " << assign[N] << ",   var = " << assign[N+1] << std::endl;
+//            if (result == assign[N+1]) {
+//              support = true;
+////              cout << "%% supported!" << std::endl;
+//              break;
+//            }
+//          }
+////          cout << "%% UNsupported!" << std::endl;
+//        }
+////        cout << "%% ---> Removal? nodestack len:" << nodestack.size() << ", headstack len:" << headstack.size() << ", i == " << i << std::endl;
+//        if (hd.idx < N && !support
+//              && !x[hd.idx]->remValNotR(hd.val)
+//              && !x[hd.idx]->remVal(hd.val, nullptr)) {
+////          cout << "%% -----> FAIL" << std::endl;
+//          return false;
+//        }
+//        if (hd.idx == N && !support
+//            && !s->remValNotR(hd.val)
+//            && !s->remVal(hd.val, nullptr)) {
+////          cout << "%% -----> FAIL" << std::endl;
+//          return false;
+//        }
+//        if (hd.idx == N+1 && !support
+//                     && !y->remValNotR(hd.val)
+//                     && !y->remVal(hd.val, nullptr)) {
+////          cout << "%% -----> FAIL" << std::endl;
+//          return false;
+//        }
+////        cout << "%% -----> Nope" << std::endl;
+//      }
+//    }
+////    cout << "%% RETURN true" << std::endl;
+//    return true;
+//  }
+//
   //---------//
   // Best LB // mode = 9
   //---------//
@@ -884,7 +884,7 @@ public:
     else if (mode == 0) return true;
     else if (mode == 6) {
       //return prop_lb() && prop_domain();
-      return prop_domain();
+      return true; //prop_domain();
     }
     else return prop_lb();
   }
@@ -894,103 +894,103 @@ public:
     int val;
   };
 
-  int push_domain(int i, std::stack<node> &nodestack, int ignore) {
-    //printf("%% push_domain, i=%d, ignore=%d, N = %d\n", i, ignore, N);
-    if (i == ignore) i++;
-    if (i < N) {
-      //cout << "%% x[" << i << "] = " << x[i]->getMin() << ".." << x[i]->getMax() << std::endl;
-      for (int val = x[i]->getMin(); val <= x[i]->getMax(); ++val) {
-        //cout << "%% val = " << val << ", indomain? " << x[i]->indomain(i) << ", (val-1,val,val+1) = (" << x[i]->vals[val-1] << ","<< x[i]->vals[val] << "," << x[i]->vals[val+1] << ")" << std::endl;
-        //if (!x[i]->indomain(i)) continue;
-//        cout << "%% uncontinued" << std::endl;
-        node item = {i, val};
-        nodestack.push(item);
-      }
-    } else if (i == N) {
-//      cout << "%% s = " << s->getMin() << ".." << s->getMax() << std::endl;
-      for (int val = s->getMin(); val <= s->getMax(); ++val) {
-        if (!s->indomain(i)) continue;
-        node item = {i, val};
-        nodestack.push(item);
-      }
-    } else if (i == N+1) {
-      for (int val = y->getMin(); val <= y->getMax(); ++val) {
-        if (!y->indomain(i)) continue;
-        node item = {i, val};
-        nodestack.push(item);
-      }
-    } else return 1;
-    return 0;
-  }
-
-  bool prop_domain() {
-    if (y->setMaxNotR(scale)) y->setMax(scale, nullptr);
-    for (int i = 0; i <= N+1; ++i) {
-      int assign[N+2];
-      std::stack<node> headstack;
-      push_domain(i, headstack, -1);
-      while (!headstack.empty()) {
-        node hd = headstack.top();
-        headstack.pop();
-        assign[hd.idx] = hd.val;
-        std::stack<node> nodestack;
-        push_domain(0, nodestack, i);
-        bool support = false;
-//        cout << "%% outer loop, nodetack.size() = " << nodestack.size() << std::endl;
-        while (!nodestack.empty()) {
-          node nd = nodestack.top();
-          nodestack.pop();
-          assign[nd.idx] = nd.val;
-          push_domain(nd.idx+1, nodestack, i);
-//          cout << "%% inner loop, nd.idx+1 = " << nd.idx+1 << std::endl;
-          if (nd.idx+1 > N+1) {
-            int64_t sumx = 0;
-            for (int i = 0; i < N; i++) sumx += assign[i];
-
-            if (sumx != assign[N]) continue;
-
-            int64_t diff = 0;
-            for (int i = 0; i < N; ++i) {
-              for (int j = i+1; j < N; ++j) {
-                diff += labs(assign[i] - assign[j]);
-              }
-            } diff *= scale;
-
-            const int reset = std::fegetround();
-            std::fesetround(FE_DOWNWARD);
-            auto gini_f = (long double) diff / (long double) (N * assign[N]);
-            auto result = (int64_t) gini_f;
-            std::fesetround(reset);
-
-            cout << "%% result = " << result << ", assign[N+1] = " << assign[N+1] << std::endl;
-
-            if (result == assign[N+1]) {
-              support = true;
-              break;
-            }
-            cout << "%% UNSUPPORTED!" << std::endl;
-          }
-        }
-        cout << "%% ---> Removal? nodestack len:" << nodestack.size() << ", headstack len:" << headstack.size() << ", i == " << i << std::endl;
-        if (hd.idx < N && !support
-            && !x[hd.idx]->remValNotR(hd.val)
-            && !x[hd.idx]->remVal(hd.val, nullptr)) {
-          return false;
-        }
-        if (hd.idx == N && !support
-            && !s->remValNotR(hd.val)
-            && !s->remVal(hd.val, nullptr)) {
-          return false;
-        }
-        if (hd.idx == N+1 && !support
-            && !y->remValNotR(hd.val)
-            && !y->remVal(hd.val, nullptr)) {
-          return false;
-        }
-      }
-    }
-    return true;
-  }
+//  int push_domain(int i, std::stack<node> &nodestack, int ignore) {
+//    //printf("%% push_domain, i=%d, ignore=%d, N = %d\n", i, ignore, N);
+//    if (i == ignore) i++;
+//    if (i < N) {
+//      //cout << "%% x[" << i << "] = " << x[i]->getMin() << ".." << x[i]->getMax() << std::endl;
+//      for (int val = x[i]->getMin(); val <= x[i]->getMax(); ++val) {
+//        //cout << "%% val = " << val << ", indomain? " << x[i]->indomain(i) << ", (val-1,val,val+1) = (" << x[i]->vals[val-1] << ","<< x[i]->vals[val] << "," << x[i]->vals[val+1] << ")" << std::endl;
+//        //if (!x[i]->indomain(i)) continue;
+////        cout << "%% uncontinued" << std::endl;
+//        node item = {i, val};
+//        nodestack.push(item);
+//      }
+//    } else if (i == N) {
+////      cout << "%% s = " << s->getMin() << ".." << s->getMax() << std::endl;
+//      for (int val = s->getMin(); val <= s->getMax(); ++val) {
+//        if (!s->indomain(i)) continue;
+//        node item = {i, val};
+//        nodestack.push(item);
+//      }
+//    } else if (i == N+1) {
+//      for (int val = y->getMin(); val <= y->getMax(); ++val) {
+//        if (!y->indomain(i)) continue;
+//        node item = {i, val};
+//        nodestack.push(item);
+//      }
+//    } else return 1;
+//    return 0;
+//  }
+//
+//  bool prop_domain() {
+//    if (y->setMaxNotR(scale)) y->setMax(scale, nullptr);
+//    for (int i = 0; i <= N+1; ++i) {
+//      int assign[N+2];
+//      std::stack<node> headstack;
+//      push_domain(i, headstack, -1);
+//      while (!headstack.empty()) {
+//        node hd = headstack.top();
+//        headstack.pop();
+//        assign[hd.idx] = hd.val;
+//        std::stack<node> nodestack;
+//        push_domain(0, nodestack, i);
+//        bool support = false;
+////        cout << "%% outer loop, nodetack.size() = " << nodestack.size() << std::endl;
+//        while (!nodestack.empty()) {
+//          node nd = nodestack.top();
+//          nodestack.pop();
+//          assign[nd.idx] = nd.val;
+//          push_domain(nd.idx+1, nodestack, i);
+////          cout << "%% inner loop, nd.idx+1 = " << nd.idx+1 << std::endl;
+//          if (nd.idx+1 > N+1) {
+//            int64_t sumx = 0;
+//            for (int i = 0; i < N; i++) sumx += assign[i];
+//
+//            if (sumx != assign[N]) continue;
+//
+//            int64_t diff = 0;
+//            for (int i = 0; i < N; ++i) {
+//              for (int j = i+1; j < N; ++j) {
+//                diff += labs(assign[i] - assign[j]);
+//              }
+//            } diff *= scale;
+//
+//            const int reset = std::fegetround();
+//            std::fesetround(FE_DOWNWARD);
+//            auto gini_f = (long double) diff / (long double) (N * assign[N]);
+//            auto result = (int64_t) gini_f;
+//            std::fesetround(reset);
+//
+//            cout << "%% result = " << result << ", assign[N+1] = " << assign[N+1] << std::endl;
+//
+//            if (result == assign[N+1]) {
+//              support = true;
+//              break;
+//            }
+//            cout << "%% UNSUPPORTED!" << std::endl;
+//          }
+//        }
+//        cout << "%% ---> Removal? nodestack len:" << nodestack.size() << ", headstack len:" << headstack.size() << ", i == " << i << std::endl;
+//        if (hd.idx < N && !support
+//            && !x[hd.idx]->remValNotR(hd.val)
+//            && !x[hd.idx]->remVal(hd.val, nullptr)) {
+//          return false;
+//        }
+//        if (hd.idx == N && !support
+//            && !s->remValNotR(hd.val)
+//            && !s->remVal(hd.val, nullptr)) {
+//          return false;
+//        }
+//        if (hd.idx == N+1 && !support
+//            && !y->remValNotR(hd.val)
+//            && !y->remVal(hd.val, nullptr)) {
+//          return false;
+//        }
+//      }
+//    }
+//    return true;
+//  }
 
   bool prop_lb() {
 //    printf("%%PROP LB BEGIN-\n");
