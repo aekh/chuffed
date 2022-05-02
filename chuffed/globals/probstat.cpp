@@ -1,4 +1,5 @@
 #include <chuffed/core/propagator.h>
+//#include <chuffed/vars/int-var.h>
 #include <stdlib.h>
 #include <cfenv>
 
@@ -6,6 +7,8 @@
 #include <fstream>
 
 #include <stdio.h>
+#include <vector>
+
 //#include <stdlib.h>
 
 using namespace std;
@@ -95,9 +98,8 @@ public:
   void wakeup(int i, int c) override {
     if (subsumed) return;
     n_wakeups++;
-    if (mode == 6) pushInQueue();
 
-    if (!all_fixed && i < N && c & EVENT_F) {
+    if (!all_fixed && i < N && x[i]->isFixed()) {
       n_fixed++;
       if (n_fixed == N) {
         all_fixed = 1;
@@ -105,6 +107,8 @@ public:
         return;
       }
     }
+
+    if (mode == 6) pushInQueue();
 
     if (mode == 9 && glb <= lub && daemon) { // Trivial case: var >= 0;
       if (i < N && c & EVENT_U && x[i]->getMax() < lub)
@@ -134,13 +138,12 @@ public:
   }
 
   bool propagate() override {
-//    printf("%% running propagate\n");
     n_runs++;
     if (all_fixed) return checking_prop();
     switch (mode) {
       case 6:
         //return prop_x_dc();
-        return true; //prop_domain();
+        return prop_var_ub() && prop_var_lb_real() && prop_domain();
       case 9: // Real version (as in paper)
         return prop_var_lb_real();
       default: // checking x, filter v
@@ -263,8 +266,15 @@ public:
   //------------//
 
   void init_dc() {
-    //pos.growTo(N);
-    //for (int i = 0; i < N; ++i) pos[i] = 2;
+    pos.growTo(N);
+    for (int i = 0; i < N; ++i) pos[i] = 2;
+
+    int n_fixed_ = 0;
+    for (int i = 0; i < N; ++i) {
+      if (x[i]->isFixed()) n_fixed_++;
+    }
+    n_fixed = n_fixed_;
+
     for (int i = 0; i < N; i++) {
       x[i]->attach(this, i, EVENT_C);
     }
@@ -430,31 +440,146 @@ public:
     return true;
   }
 
-//  struct node {
-//    IntVar &x;
-//    int val;
-//  };
-//
-//  void push_domain(IntVar &x, std::stack<node> &nodestack) {
-//    for (int i = x.getMin(); i <= x.getMax(); ++i) {
-//      if (!x.indomain(i)) continue;
-//      node item = {x, i};
-//      nodestack.push(item);
-//    }
-//  }
-//
-//  bool prop_domain() {
-//    int values[N+1];
-//    for (int i = 0; i <= N+1; ++i) {
-//      std::vector<IntVar&> tree;
-//      //IntVar &tree[N+1];
-//      for (int j = 0; j <= N+1; ++i) {
-//
-//      }
-//      std::stack<node> nodestack;
-//      push_domain();
-//    }
-//  }
+  bool prop_var_ub() {
+    // Popoviciu's inequality on variances
+    int64_t min_lb = INT64_MAX;
+    int64_t max_ub = INT64_MIN;
+    for (int i = 0; i < N; i++) {
+      int64_t lb = x[i]->getMin();
+      int64_t ub = x[i]->getMax();
+      if (lb < min_lb) {
+        min_lb = lb;
+        lb_idx = i;
+      }
+      if (ub > max_ub) {
+        max_ub = ub;
+        ub_idx = i;
+      }
+    }
+    int64_t sqdiff = (max_ub - min_lb) * (max_ub - min_lb);
+    long double var_ub_f = (long double) sqdiff / (long double) 4;
+    int64_t var_ub = (int64_t) (var_ub_f * scale);
+
+    // set y
+    if(y->setMaxNotR(var_ub)) {
+      Clause* r = nullptr;
+      if(so.lazy) {
+        // Set up reason
+        r = Reason_new(2*N+1);
+        for(int ii = 0; ii < N; ++ii) {
+          (*r)[ii+1] = x[ii]->getMaxLit();
+          (*r)[N+ii+1] = x[ii]->getMinLit();
+        }
+      }
+      if(!y->setMax(var_ub, r)) return false;
+    }
+    return true;
+  }
+
+  struct node {
+    int idx;
+    int val;
+  };
+
+  int push_domain(int i, std::stack<node> &nodestack, int ignore) {
+//    printf("%% push_domain, i=%d\n", i);
+    if (i == ignore) i++;
+    if (i < N) {
+      for (int val = x[i]->getMin(); val <= x[i]->getMax(); ++val) {
+        if (!x[i]->indomain(i)) continue;
+        node item = {i, val};
+        nodestack.push(item);
+      }
+    } else if (i == N) {
+      for (int val = s->getMin(); val <= s->getMax(); ++val) {
+        if (!s->indomain(i)) continue;
+        node item = {i, val};
+        nodestack.push(item);
+      }
+    } else if (i == N+1) {
+      for (int val = y->getMin(); val <= y->getMax(); ++val) {
+        if (!y->indomain(i)) continue;
+        node item = {i, val};
+        nodestack.push(item);
+      }
+    } else return 1;
+    return 0;
+  }
+
+  bool prop_domain() {
+    for (int i = 0; i <= N+1; ++i) {
+      //printf("%% FOR! i == %d\n", i);
+      int assign[N+2];
+      std::stack<node> headstack;
+      push_domain(i, headstack, -1);
+      while (!headstack.empty()) {
+//        printf("%% ....WHILE!\n");
+        node hd = headstack.top();
+        headstack.pop();
+        assign[hd.idx] = hd.val;
+        std::stack<node> nodestack;
+        push_domain(0, nodestack, i);
+        bool support = false;
+        while (!nodestack.empty()) {
+//          printf("%% ........WHILE!\n");
+          node nd = nodestack.top();
+//          printf("%% node nd = nodestack.top(); done\n");
+          nodestack.pop();
+//          printf("%% nodestack.pop(); done\n");
+          assign[nd.idx] = nd.val;
+//          printf("%% assign[nd.idx] = nd.val; done\n");
+          push_domain(nd.idx+1, nodestack, i);
+//          printf("%% push_domain(nd.idx+1, nodestack, i); done\n");
+          if (nd.idx+1 > N+1) {
+            int64_t sumx = 0;
+            for (int i = 0; i < N; i++) sumx += assign[i];
+
+            if (sumx != assign[N]) continue;
+
+            int64_t sqdiff = 0;
+            for (int i = 0; i < N; i++) {
+              int64_t diff = N * assign[i] - sumx;
+              sqdiff += diff * diff;
+            }
+
+            long double result_f = (long double) sqdiff / (long double) (N*N*N);
+            int64_t result = (int64_t) (result_f * scale);
+
+//            for (int i = 0; i < N; i++) {cout << "%% x[" << i+1 << "] = " << assign[i] << ",   ";}
+//            cout << "sum = " << assign[N] << ",   var = " << assign[N+1] << std::endl;
+            if (result == assign[N+1]) {
+              support = true;
+//              cout << "%% supported!" << std::endl;
+              break;
+            }
+          }
+//          cout << "%% UNsupported!" << std::endl;
+        }
+//        cout << "%% ---> Removal? nodestack len:" << nodestack.size() << ", headstack len:" << headstack.size() << ", i == " << i << std::endl;
+        if (hd.idx < N && !support
+              && !x[hd.idx]->remValNotR(hd.val)
+              && !x[hd.idx]->remVal(hd.val, nullptr)) {
+//          cout << "%% -----> FAIL" << std::endl;
+          return false;
+        }
+        if (hd.idx == N && !support
+            && !s->remValNotR(hd.val)
+            && !s->remVal(hd.val, nullptr)) {
+//          cout << "%% -----> FAIL" << std::endl;
+          return false;
+        }
+        if (hd.idx == N+1 && !support
+                     && !y->remValNotR(hd.val)
+                     && !y->remVal(hd.val, nullptr)) {
+//          cout << "%% -----> FAIL" << std::endl;
+          return false;
+        }
+//        cout << "%% -----> Nope" << std::endl;
+      }
+    }
+//    cout << "%% RETURN true" << std::endl;
+    return true;
+  }
 
   //---------//
   // Best LB // mode = 9
@@ -598,11 +723,19 @@ public:
         break;
       default:
         // events
-        for (int i = 0; i < N; i++) {
-          x[i]->attach(this, i, EVENT_LU);
+        if (mode != 6) {
+          for (int i = 0; i < N; i++) {
+            x[i]->attach(this, i, EVENT_LU);
+          }
+          y->attach(this, N, EVENT_F);
+          s->attach(this, N+1, EVENT_F);
+        } else {
+          for (int i = 0; i < N; i++) {
+            x[i]->attach(this, i, EVENT_C);
+          }
+          y->attach(this, N, EVENT_C);
+          s->attach(this, N+1, EVENT_C);
         }
-        y->attach(this, N, EVENT_F);
-        s->attach(this, N+1, EVENT_F);
 
         // trivial case
         if (mode == 9) {
@@ -708,7 +841,7 @@ public:
       }
     }
 
-    if (!all_fixed && i < N && c & EVENT_F) {
+    if (!all_fixed && i < N && x[i]->isFixed()) {
       n_fixed++;
       if (n_fixed == N) {
         all_fixed = 1;
@@ -716,6 +849,8 @@ public:
         return;
       }
     }
+
+    if (mode == 6) pushInQueue();
 
     if (mode == 9 && glb <= lub && daemon) { // Trivial case: Gini >= 0;
       if (i < N && c & EVENT_U && x[i]->getMax() < lub)
@@ -747,7 +882,114 @@ public:
   bool propagate() override {
     if (all_fixed) return prop_fix();
     else if (mode == 0) return true;
+    else if (mode == 6) {
+      //return prop_lb() && prop_domain();
+      return prop_domain();
+    }
     else return prop_lb();
+  }
+
+  struct node {
+    int idx;
+    int val;
+  };
+
+  int push_domain(int i, std::stack<node> &nodestack, int ignore) {
+    //printf("%% push_domain, i=%d, ignore=%d, N = %d\n", i, ignore, N);
+    if (i == ignore) i++;
+    if (i < N) {
+      //cout << "%% x[" << i << "] = " << x[i]->getMin() << ".." << x[i]->getMax() << std::endl;
+      for (int val = x[i]->getMin(); val <= x[i]->getMax(); ++val) {
+        //cout << "%% val = " << val << ", indomain? " << x[i]->indomain(i) << ", (val-1,val,val+1) = (" << x[i]->vals[val-1] << ","<< x[i]->vals[val] << "," << x[i]->vals[val+1] << ")" << std::endl;
+        //if (!x[i]->indomain(i)) continue;
+//        cout << "%% uncontinued" << std::endl;
+        node item = {i, val};
+        nodestack.push(item);
+      }
+    } else if (i == N) {
+//      cout << "%% s = " << s->getMin() << ".." << s->getMax() << std::endl;
+      for (int val = s->getMin(); val <= s->getMax(); ++val) {
+        if (!s->indomain(i)) continue;
+        node item = {i, val};
+        nodestack.push(item);
+      }
+    } else if (i == N+1) {
+      for (int val = y->getMin(); val <= y->getMax(); ++val) {
+        if (!y->indomain(i)) continue;
+        node item = {i, val};
+        nodestack.push(item);
+      }
+    } else return 1;
+    return 0;
+  }
+
+  bool prop_domain() {
+    if (y->setMaxNotR(scale)) y->setMax(scale, nullptr);
+    for (int i = 0; i <= N+1; ++i) {
+      int assign[N+2];
+      std::stack<node> headstack;
+      push_domain(i, headstack, -1);
+      while (!headstack.empty()) {
+        node hd = headstack.top();
+        headstack.pop();
+        assign[hd.idx] = hd.val;
+        std::stack<node> nodestack;
+        push_domain(0, nodestack, i);
+        bool support = false;
+//        cout << "%% outer loop, nodetack.size() = " << nodestack.size() << std::endl;
+        while (!nodestack.empty()) {
+          node nd = nodestack.top();
+          nodestack.pop();
+          assign[nd.idx] = nd.val;
+          push_domain(nd.idx+1, nodestack, i);
+//          cout << "%% inner loop, nd.idx+1 = " << nd.idx+1 << std::endl;
+          if (nd.idx+1 > N+1) {
+            int64_t sumx = 0;
+            for (int i = 0; i < N; i++) sumx += assign[i];
+
+            if (sumx != assign[N]) continue;
+
+            int64_t diff = 0;
+            for (int i = 0; i < N; ++i) {
+              for (int j = i+1; j < N; ++j) {
+                diff += labs(assign[i] - assign[j]);
+              }
+            } diff *= scale;
+
+            const int reset = std::fegetround();
+            std::fesetround(FE_DOWNWARD);
+            auto gini_f = (long double) diff / (long double) (N * assign[N]);
+            auto result = (int64_t) gini_f;
+            std::fesetround(reset);
+
+            cout << "%% result = " << result << ", assign[N+1] = " << assign[N+1] << std::endl;
+
+            if (result == assign[N+1]) {
+              support = true;
+              break;
+            }
+            cout << "%% UNSUPPORTED!" << std::endl;
+          }
+        }
+        cout << "%% ---> Removal? nodestack len:" << nodestack.size() << ", headstack len:" << headstack.size() << ", i == " << i << std::endl;
+        if (hd.idx < N && !support
+            && !x[hd.idx]->remValNotR(hd.val)
+            && !x[hd.idx]->remVal(hd.val, nullptr)) {
+          return false;
+        }
+        if (hd.idx == N && !support
+            && !s->remValNotR(hd.val)
+            && !s->remVal(hd.val, nullptr)) {
+          return false;
+        }
+        if (hd.idx == N+1 && !support
+            && !y->remValNotR(hd.val)
+            && !y->remVal(hd.val, nullptr)) {
+          return false;
+        }
+      }
+    }
+    return true;
   }
 
   bool prop_lb() {
@@ -946,6 +1188,7 @@ public:
 
   bool prop_fix() {
     int64_t diff = 0;
+    //bool redherring = true;
     for (int i = 0; i < N; ++i) {
       for (int j = i+1; j < N; ++j) {
         diff += labs(x[i]->getVal() - x[j]->getVal());
